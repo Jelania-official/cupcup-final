@@ -9,6 +9,7 @@ log*/
 # Python generated files
 **/__pycache__/
 *.py[cod]
+**/.SEURobot.cache
 
 # Local editor and OS files
 .vscode/

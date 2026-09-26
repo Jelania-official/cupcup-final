@@ -1,0 +1,121 @@
+#VRML_SIM R2023b utf8
+EXTERNPROTO "../protos/RobocupSoccerField.proto"
+EXTERNPROTO "../protos/TexturedBackground.proto"
+EXTERNPROTO "../protos/SoccerBall.proto"
+EXTERNPROTO "../protos/SEURobot.proto"
+WorldInfo {
+  # default gravity direction is changed since 2020b https://github.com/cyberbotics/webots/pull/1643
+  coordinateSystem "NUE"
+  basicTimeStep 20
+  physicsDisableTime 0.1
+  physicsDisableLinearThreshold 0.1
+  physicsDisableAngularThreshold 0.1
+  contactProperties [
+    ContactProperties {
+      material1 "grass"
+      coulombFriction [
+        0.5
+      ]
+      softCFM 0.03
+    }
+    ContactProperties {
+      material1 "grass"
+      material2 "robocup soccer ball"
+      coulombFriction [
+        0.5
+      ]
+      bounce 0.76
+      softCFM 0.05
+    }
+    ContactProperties {
+      material2 "robocup soccer ball"
+      bounce 0.76
+    }
+  ]
+}
+Viewpoint {
+  orientation -0.6413 0.703702 0.305838 2.56963
+  position 1.29 9.44 11.7
+}
+TexturedBackground {
+  texture "noon_cloudy_countryside"
+}
+DirectionalLight {
+  ambientIntensity 1
+  direction 5 -0.5 0
+  intensity 2
+}
+DirectionalLight {
+  ambientIntensity 1
+  direction -5 -0.5 0
+  intensity 2
+}
+DirectionalLight {
+  ambientIntensity 1
+  direction 0 -0.5 4
+  intensity 2
+}
+DirectionalLight {
+  ambientIntensity 1
+  direction 0 -0.5 -4
+  intensity 2
+}
+RobocupSoccerField {
+  rotation 1 0 0 -1.5707996938995747
+}
+DEF Ball SoccerBall {
+  translation 2.44 0.06999999999999999 0
+  radius 0.07
+  mass 0.5
+  linearDamping 0.5
+  angularDamping 0.5
+  faceUrl [
+    "textures/blackball.jpg"
+  ]
+}
+
+DEF red_1 SEURobot {
+  translation 0.75 0.365 0
+  rotation 0 1 0 3.1415926
+  robotColor 0.8 0 0
+  name "red_1"
+  controller "<extern>"
+  numberUrl [
+    "textures/number1.png"
+  ]
+}
+DEF red_2 SEURobot {
+  translation 3.0 0.365 0
+  rotation 0 1 0 3.1415926
+  robotColor 0.8 0 0
+  name "red_2"
+  controller "<extern>"
+  numberUrl [
+    "textures/number2.png"
+  ]
+}
+DEF blue_1 SEURobot {
+  translation -0.75 0.365 0
+  rotation 0 1 0 0
+  robotColor 0 0 0.8
+  name "blue_1"
+  controller "<extern>"
+  numberUrl [
+    "textures/number1.png"
+  ]
+}
+DEF blue_2 SEURobot {
+  translation -3.0 0.365 0
+  rotation 0 1 0 0
+  robotColor 0 0 0.8
+  name "blue_2"
+  controller "<extern>"
+  numberUrl [
+    "textures/number2.png"
+  ]
+}
+DEF judge Robot {
+  name "judge"
+  controller "<extern>"
+  supervisor TRUE
+}

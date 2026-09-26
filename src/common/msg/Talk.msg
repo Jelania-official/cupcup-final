@@ -1,0 +1,1 @@
+string talk_str
