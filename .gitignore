@@ -1,0 +1,23 @@
+# ROS 2 / colcon generated output
+build/
+build*/
+install/
+install*/
+log/
+log*/
+
+# Python generated files
+**/__pycache__/
+*.py[cod]
+
+# Local editor and OS files
+.vscode/
+.idea/
+.cache/
+.DS_Store
+*.swp
+
+# Local test logs and temporary artifacts
+*.log
+tmp/
+tmp-*/

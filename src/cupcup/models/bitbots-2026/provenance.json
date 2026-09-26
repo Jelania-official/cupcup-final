@@ -1,0 +1,7 @@
+{
+  "source": "https://data.bit-bots.de/models/2026_07_01_yoeo_x_wm/onnx/yoeo.onnx",
+  "opencv_sha256": "3ee7c48c82e354dfb60c75939c287e2a0241bb3cf43e17495ccd64cf295c9f63",
+  "opencv_bytes": 25832307,
+  "status": "Package-local development copy; upstream weight licence requires final release review",
+  "decoder_anchor": 99.99983
+}
