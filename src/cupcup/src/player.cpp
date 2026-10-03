@@ -174,6 +174,10 @@ public:
             node_->declare_parameter<double>("approach_timeout", 60.0), 30.0, 90.0);
         orbitTimeout_ = clampValue(
             node_->declare_parameter<double>("orbit_timeout", 25.0), 15.0, 45.0);
+        settleSeconds_ = clampValue(
+            node_->declare_parameter<double>("settle_seconds", 0.08), 0.05, 0.50);
+        alignStableFrames_ = std::max(2, std::min(4,
+            static_cast<int>(node_->declare_parameter<int>("align_stable_frames", 3))));
         attackYaw_ = color_ == Color::Red ? 180.0 : 0.0;
         targetYaw_ = attackYaw_;
         yawSign_ = node_->declare_parameter<double>("imu_yaw_sign", 1.0);
@@ -387,6 +391,7 @@ private:
         commandedHeadYaw_ = 0.0;
         commandedHeadPitch_ = 20.0;
         leftFoot_ = true;
+        footLocked_ = false;
         actionIssued_ = false;
         defenderClearIssued_ = false;
         defenderClearStableFramesSeen_ = 0;
@@ -409,15 +414,20 @@ private:
     void transition(ForwardState next, double time)
     {
         if (next == state_) return;
+        const bool preserveAlignment = state_ == ForwardState::Align &&
+            next == ForwardState::Settle;
         if (next == ForwardState::Search) {
             searchLowFirst_ = state_ == ForwardState::Recover;
         }
         if (next == ForwardState::Align || next == ForwardState::Settle) {
             shotLaneSelected_ = false;
         }
+        if (next == ForwardState::Align && state_ != ForwardState::Settle) {
+            footLocked_ = false;
+        }
         state_ = next;
         enteredAt_ = time;
-        stableFrames_ = 0;
+        if (!preserveAlignment) stableFrames_ = 0;
         RCLCPP_INFO(node_->get_logger(), "%s strategy -> %s", robot_.c_str(), stateName(state_));
         if (next == ForwardState::Kick) {
             actionIssued_ = false;
@@ -644,7 +654,7 @@ private:
             // Move into the calibrated downward view while ORBIT still has
             // enough range to follow the ball. A direct jump loses near balls.
             commandedHeadPitch_ = std::min(kickPitch_, commandedHeadPitch_ +
-                clampValue((kickPitch_ - commandedHeadPitch_) * 0.18, 0.5, 1.5));
+                clampValue((kickPitch_ - commandedHeadPitch_) * 0.22, 0.7, 2.2));
         } else if (ball_.y < 0.30 || ball_.y > 0.68) {
             commandedHeadPitch_ = clampValue(head_.pitch +
                 clampValue((ball_.y - 0.49) * 4.0, -1.8, 1.8), 8.0, kickPitch_);
@@ -711,7 +721,8 @@ private:
                 // high-performing teams and avoids an immediate blind sweep.
                 commandedHeadYaw_ = clampValue(lastBearing_, -60.0, 60.0);
             }
-            if (hasBall) transition(ForwardState::Approach, time);
+            if (hasBall && std::abs(lastBearing_) <= 45.0)
+                transition(ForwardState::Approach, time);
             // Keep the body planted during the visual scan.  In this Webots
             // model short isolated turn tasks can destabilize a standing
             // robot; the head sweep already covers the validated kickoff
@@ -728,14 +739,16 @@ private:
                     transition(ForwardState::Search, time);
                 } else {
                 const double speed = ball_.radius < 0.025 ? 0.05 :
-                    (ball_.radius < 0.045 ? 0.04 : 0.032);
+                    (ball_.radius < 0.045 ? 0.04 :
+                    clampValue((0.075 - ball_.radius) * 0.75, 0.018, 0.032));
                 // A pure turn task is not reliable in this Webots gait: in
                 // some initial poses the commanded yaw is accepted but the
                 // robot does not change heading.  Use a small crawl while
                 // turning so the approach cannot deadlock at a persistent
                 // 20--40 degree bearing.  Once centered, use the calibrated
                 // forward speed.
-                const double forward = std::abs(lastBearing_) > 24.0 ? 0.008 : speed;
+                const double forward = std::abs(lastBearing_) > 24.0 ? 0.010 :
+                    speed * clampValue(1.0 - std::abs(lastBearing_) / 70.0, 0.65, 1.0);
                 // Recover the four-player kickoff view quickly when the ball
                 // starts near the edge or behind the camera.
                 double turn = clampValue(lastBearing_ * 0.18, -4.0, 4.0);
@@ -780,7 +793,7 @@ private:
                         clampValue(lateral, -0.028, 0.028), clampValue(turn, -8.0, 8.0));
                 }
                 if (std::abs(headingError()) < 15.0 && std::abs(lastBearing_) < 22.0 &&
-                    std::abs(head_.yaw) < 8.0 && head_.pitch > kickPitch_ - 8.0 &&
+                    std::abs(head_.yaw) < 12.0 && head_.pitch > kickPitch_ - 12.0 &&
                     ball_.y > 0.30 && ball_.radius > 0.050 && ball_.radius < 0.12) {
                     leftFoot_ = lastBearing_ >= 0.0;
                     transition(ForwardState::Align, time);
@@ -789,11 +802,16 @@ private:
         } else if (state_ == ForwardState::Align || state_ == ForwardState::Settle) {
             commandedHeadYaw_ = 0.0;
             commandedHeadPitch_ = kickPitch_;
-            const double desiredX = leftFoot_ ? leftKickX_ : rightKickX_;
             const bool fixedView = std::abs(head_.yaw) < 6.0 &&
                 std::abs(head_.pitch - kickPitch_) < 5.0;
-            const bool linedUp = hasBall && fixedView && std::abs(headingError()) < 13.0 &&
-                std::abs(ball_.x - desiredX) < 0.060 && std::abs(ball_.y - kickY_) < 0.070 &&
+            if (state_ == ForwardState::Align && hasBall && fixedView && !footLocked_) {
+                leftFoot_ = std::abs(ball_.x - leftKickX_) <=
+                    std::abs(ball_.x - rightKickX_);
+                footLocked_ = true;
+            }
+            const double desiredX = leftFoot_ ? leftKickX_ : rightKickX_;
+            const bool linedUp = hasBall && fixedView && std::abs(headingError()) < 14.0 &&
+                std::abs(ball_.x - desiredX) < 0.070 && std::abs(ball_.y - kickY_) < 0.080 &&
                 ball_.radius > 0.048;
             const bool holdPose = hasBall && fixedView && std::abs(headingError()) < 19.0 &&
                 std::abs(ball_.x - desiredX) < 0.095 && std::abs(ball_.y - kickY_) < 0.105 &&
@@ -802,15 +820,18 @@ private:
                 (holdPose ? stableFrames_ : 0);
             if (state_ == ForwardState::Settle) {
                 if (!holdPose) transition(ForwardState::Align, time);
-                else if (stateAge > 0.8 && stableFrames_ >= 3) transition(ForwardState::Kick, time);
+                else if (stateAge > settleSeconds_ && linedUp &&
+                         stableFrames_ >= alignStableFrames_)
+                    transition(ForwardState::Kick, time);
             } else if (!hasBall) {
                 if (time - ballSeenAt_ > 0.8) transition(ForwardState::Recover, time);
             } else if (fixedView) {
                 if (std::abs(headingError()) > 27.0) transition(ForwardState::Orbit, time);
-                else if (stableFrames_ >= 3) transition(ForwardState::Settle, time);
-                else walk(body, clampValue((kickY_ - ball_.y) * 0.16, -0.018, 0.025),
-                          clampValue((desiredX - ball_.x) * 0.20, -0.028, 0.028),
-                          headingError() * 0.24);
+                else if (stableFrames_ >= alignStableFrames_)
+                    transition(ForwardState::Settle, time);
+                else walk(body, clampValue((kickY_ - ball_.y) * 0.24, -0.022, 0.030),
+                          clampValue((desiredX - ball_.x) * 0.30, -0.028, 0.028),
+                          clampValue(headingError() * 0.22, -6.0, 6.0));
             }
         } else if (state_ == ForwardState::Kick) {
             commandedHeadYaw_ = 0.0;
@@ -1196,6 +1217,8 @@ private:
     double gameTimeout_ = 2.50;
     double approachTimeout_ = 60.0;
     double orbitTimeout_ = 25.0;
+    double settleSeconds_ = 0.08;
+    int alignStableFrames_ = 3;
     int ballConfirmHits_ = 2;
     double commandedHeadYaw_ = 0.0;
     double commandedHeadPitch_ = 20.0;
@@ -1212,6 +1235,7 @@ private:
     bool shotLaneSelected_ = false;
     bool actionIssued_ = false;
     bool leftFoot_ = true;
+    bool footLocked_ = false;
     Ball ball_;
     RobotDetection keeper_;
     RobotDetection keeperCandidate_;

@@ -40,6 +40,8 @@ def generate_launch_description():
         "game_timeout": 2.50,
         "approach_timeout": 60.0,
         "orbit_timeout": 25.0,
+        "settle_seconds": 0.08,
+        "align_stable_frames": 3,
     }
     return LaunchDescription([
         DeclareLaunchArgument("team_name", default_value="cupcup"),
