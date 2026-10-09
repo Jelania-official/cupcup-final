@@ -2,6 +2,7 @@
 #include <seurobot/seu_robot.hpp>
 #include <seumath/math.hpp>
 #include <chrono>
+#include <cstdlib>
 
 #include "subscribers.hpp"
 #include "services.hpp"
@@ -52,6 +53,7 @@ int main(int argc, char ** argv)
     bool actionConsumed = false;
     double actionLockUntil = 0.0;
     int lastTaskType = -1;
+    double lastDiagnostic = 0.0;
     std::string lastActionName;
     std::vector<common::msg::BodyAngles> angles = actEng->runAction("reset");
     AddBodyAngles(angles);
@@ -80,6 +82,17 @@ int main(int argc, char ** argv)
         const double monotonicNow = std::chrono::duration<double>(
             std::chrono::steady_clock::now().time_since_epoch()).count();
         const auto observedTask = bodyTaskSubscriber->GetTask();
+        if (std::getenv("CUPCUP_TRACE_PATH") != nullptr &&
+            monotonicNow - lastDiagnostic > 2.0) {
+            const auto headTask = headTaskSubscriber->GetTask();
+            const auto game = gameSubscriber->GetData();
+            RCLCPP_INFO(node->get_logger(),
+                "trace-motion robot=%s game=%d body_count=%d step=%.3f lateral=%.3f turn=%.1f head=(%.1f,%.1f) queues=(%d,%d)",
+                robotName.c_str(), game.state, observedTask.count,
+                observedTask.step, observedTask.lateral, observedTask.turn,
+                headTask.yaw, headTask.pitch, GetBodyAnglesSize(), GetHeadAnglesSize());
+            lastDiagnostic = monotonicNow;
+        }
         if (observedTask.type != lastTaskType || observedTask.actname != lastActionName) {
             if (observedTask.type == common::msg::BodyTask::TASK_ACT &&
                 monotonicNow >= actionLockUntil && !actionConsumed) {

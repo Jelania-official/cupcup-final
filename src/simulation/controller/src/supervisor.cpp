@@ -4,11 +4,17 @@
 #include <common/msg/field_data.hpp>
 #include <common/msg/player.hpp>
 #include <common/msg/location.hpp>
+#include <common/msg/talk.hpp>
 #include "WebotsUtils.hpp"
 #include <eigen3/Eigen/Dense>
 #include <unistd.h>
 #include <cmath>
+#include <cstdlib>
+#include <fstream>
+#include <limits>
 #include <random>
+#include <sstream>
+#include <string>
 
 using namespace std;
 
@@ -126,6 +132,39 @@ private:
     rclcpp::Subscription<common::msg::GameData>::SharedPtr subscription_;
 };
 
+class TalkCapture: public rclcpp::Node
+{
+public:
+    explicit TalkCapture(const std::string &robotName): Node(robotName + "_trace_talk")
+    {
+        subscription_ = this->create_subscription<common::msg::Talk>(
+            "/" + robotName + "/talk/talk_str", 5,
+            [this](common::msg::Talk::ConstSharedPtr message) {
+                latest_ = message->talk_str;
+                ++sequence_;
+            });
+    }
+
+    const std::string &latest() const { return latest_; }
+    unsigned long sequence() const { return sequence_; }
+
+private:
+    std::string latest_;
+    unsigned long sequence_ = 0;
+    rclcpp::Subscription<common::msg::Talk>::SharedPtr subscription_;
+};
+
+std::string csvQuote(const std::string &value)
+{
+    std::string quoted = "\"";
+    for (char character : value) {
+        if (character == '"') quoted += '"';
+        quoted += character;
+    }
+    quoted += '"';
+    return quoted;
+}
+
 class LocationPublisher : public rclcpp::Node
 {
 public:
@@ -158,6 +197,15 @@ int main(int argc, char **argv)
         {Eigen::Vector3d(1.5, 0.365, -3.0), Eigen::Vector4d(0, 1, 0, -M_PI / 2)},
         {Eigen::Vector3d(2.3, 0.365, 3.0), Eigen::Vector4d(0, 1, 0, M_PI / 2)},
     };
+    const bool perceptionCalibration =
+        std::getenv("CUPCUP_PERCEPTION_CALIBRATION") != nullptr;
+    const bool calibrationBlue = perceptionCalibration &&
+        std::getenv("CUPCUP_MOCK_COLOR") != nullptr &&
+        std::string(std::getenv("CUPCUP_MOCK_COLOR")) == "blue";
+    if (perceptionCalibration && !calibrationBlue) {
+        redInitInfos[0] = {Eigen::Vector3d(1.5, 0.365, 0.0),
+            Eigen::Vector4d(0, 1, 0, M_PI)};
+    }
 
     ObjectInfo redWaitInfos[] = {
         {Eigen::Vector3d(1.5, 0.365, -3.0), Eigen::Vector4d(0, 1, 0, -M_PI / 2)},
@@ -193,6 +241,10 @@ int main(int argc, char **argv)
         {Eigen::Vector3d(-1.5, 0.365, -3.0), Eigen::Vector4d(0, 1, 0, -M_PI / 2)},
         {Eigen::Vector3d(-2.3, 0.365, 3.0), Eigen::Vector4d(0, 1, 0, M_PI / 2)},
     };
+    if (calibrationBlue) {
+        blueInitInfos[0] = {Eigen::Vector3d(-1.5, 0.365, 0.0),
+            Eigen::Vector4d(0, 1, 0, 0.0)};
+    }
 
     ObjectInfo blueWaitInfos[] = {
         {Eigen::Vector3d(-1.5, 0.365, -3.0), Eigen::Vector4d(0, 1, 0, -M_PI / 2)},
@@ -225,6 +277,8 @@ int main(int argc, char **argv)
     auto judgeNode = make_shared<rclcpp::Node>("judge");
     auto fieldPublisher = make_shared<FieldDataPublisher>();
     auto gameSubscriber = make_shared<GameDataSubscriber>("judge");
+    const std::vector<std::string> robotNames = {"red_1", "red_2", "blue_1", "blue_2"};
+    std::vector<std::shared_ptr<TalkCapture>> talkCaptures;
 
     common::msg::GameData gameData;
     common::msg::FieldData fieldData;
@@ -238,6 +292,8 @@ int main(int argc, char **argv)
     webots::Node *blue_2 = super->getFromDef("blue_2");
     webots::Node *redPlayers[2] = {red_1, red_2};
     webots::Node *bluePlayers[2] = {blue_1, blue_2};
+    // Evaluation only: the strategy never receives simulator camera truth.
+    webots::Node *cameras[4] = {nullptr, nullptr, nullptr, nullptr};
     int ballMoveCnt = 0;
     double lastBallPos[3] = {0};
     auto lastGoalTime = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
@@ -250,14 +306,68 @@ int main(int argc, char **argv)
     bool redWaitSet[2] = {false, false};
     bool blueWaitSet[2] = {false, false};
 
-    std::default_random_engine random(time(NULL));
+    unsigned int simulationSeed = static_cast<unsigned int>(time(NULL));
+    if (const char* seedText = std::getenv("CUPCUP_SIM_SEED")) {
+        char* seedEnd = nullptr;
+        const unsigned long parsedSeed = std::strtoul(seedText, &seedEnd, 10);
+        if (seedEnd != seedText && *seedEnd == '\0' &&
+            parsedSeed <= std::numeric_limits<unsigned int>::max()) {
+            simulationSeed = static_cast<unsigned int>(parsedSeed);
+        } else {
+            RCLCPP_WARN(rclcpp::get_logger("supervisor"),
+                "Ignoring invalid CUPCUP_SIM_SEED='%s'", seedText);
+        }
+    }
+    RCLCPP_INFO(rclcpp::get_logger("supervisor"), "location-noise seed=%u", simulationSeed);
+    std::default_random_engine random(simulationSeed);
     std::uniform_real_distribution<float> randDis(0, 1.0);
     std::uniform_real_distribution<float> randRad(0, 2 * M_PI);
+
+    std::ofstream trace;
+    if (const char *tracePath = std::getenv("CUPCUP_TRACE_PATH")) {
+        if (*tracePath != '\0') {
+            trace.open(tracePath, std::ios::out | std::ios::trunc);
+            if (trace) {
+                webots::Node *players[4] = {red_1, red_2, blue_1, blue_2};
+                for (size_t i = 0; i < robotNames.size(); ++i) {
+                    cameras[i] = players[i]->getFromProtoDef("CupcupCamera");
+                    if (!cameras[i]) {
+                        RCLCPP_WARN(rclcpp::get_logger("supervisor"),
+                            "Camera pose unavailable for %s", robotNames[i].c_str());
+                    }
+                }
+                trace << "time,ball_x,ball_z,ball_vx,ball_vz,ball_y";
+                for (const auto &name : robotNames) {
+                    trace << ',' << name << "_true_x," << name << "_true_z," << name
+                        << "_vx," << name << "_vz," << name << "_omega_y," << name
+                        << "_obs_x," << name << "_obs_z," << name << "_talk_seq," << name
+                        << "_talk," << name << "_camera_x," << name << "_camera_y," << name
+                        << "_camera_z";
+                    for (int element = 0; element < 9; ++element) {
+                        trace << ',' << name << "_camera_r" << element;
+                    }
+                }
+                trace << '\n';
+                RCLCPP_INFO(rclcpp::get_logger("supervisor"),
+                    "Writing evaluation-only world trace to %s", tracePath);
+            } else {
+                RCLCPP_ERROR(rclcpp::get_logger("supervisor"),
+                    "Could not open evaluation trace path: %s", tracePath);
+            }
+        }
+    }
+    if (trace) {
+        for (const auto &robotName : robotNames) {
+            talkCaptures.push_back(make_shared<TalkCapture>(robotName));
+        }
+    }
+    unsigned long traceRows = 0;
 
     while (super->step(basicTime) != -1 && rclcpp::ok()) {
         rclcpp::spin_some(judgeNode);
         rclcpp::spin_some(fieldPublisher);
         rclcpp::spin_some(gameSubscriber);
+        for (const auto &capture : talkCaptures) rclcpp::spin_some(capture);
         gameData = gameSubscriber->GetData();
 
         // update player state from gameData
@@ -406,6 +516,23 @@ int main(int argc, char **argv)
             }
         }
 
+        if (perceptionCalibration) {
+            // Eighteen two-second stages: 3 ranges x 3 bearings x 2 pitches.
+            // Cupcup's trace-only head command uses the same simulation clock.
+            const int stage = static_cast<int>(super->getTime() / 2.0) % 18;
+            const double ranges[3] = {1.5, 2.5, 3.5};
+            const double yaws[3] = {-20.0, 0.0, 20.0};
+            const double range = ranges[stage / 6];
+            const double bearing = yaws[(stage / 2) % 3] * M_PI / 180.0;
+            const double originX = calibrationBlue ? -1.5 : 1.5;
+            const double direction = calibrationBlue ? 1.0 : -1.0;
+            const double ballPosition[3] = {
+                originX + direction * range * std::cos(bearing), ballR,
+                -direction * range * std::sin(bearing)};
+            ball->setVelocity(zeroVel);
+            ball->getField("translation")->setSFVec3f(ballPosition);
+        }
+
         // update location
         for (int i = 0; i < redNum; i++) {
             const double* redpos = redPlayers[i]->getPosition();
@@ -413,6 +540,7 @@ int main(int argc, char **argv)
             float noiseRad = randRad(random);
             locRed_[i].x = redpos[0] + noiseDis * sin(noiseRad);
             locRed_[i].z = redpos[2] + noiseDis * cos(noiseRad);
+            locRed_[i].stamp = static_cast<uint32_t>(super->getTime() * 1000.0);
             locPublisherRed_[i]->Publish(locRed_[i]);
         }
 
@@ -422,9 +550,45 @@ int main(int argc, char **argv)
             float noiseRad = randRad(random);
             locBlue_[i].x = bluepos[0] + noiseDis * sin(noiseRad);
             locBlue_[i].z = bluepos[2] + noiseDis * cos(noiseRad);
+            locBlue_[i].stamp = static_cast<uint32_t>(super->getTime() * 1000.0);
             locPublisherBlue_[i]->Publish(locBlue_[i]);
-        }    
+        }
         fieldPublisher->Publish(fieldData);
+
+        if (trace) {
+            const double *ballPosition = ball->getPosition();
+            const double *ballVelocity = ball->getVelocity();
+            std::ostringstream sample;
+            sample << super->getTime() << ',' << ballPosition[0] << ',' << ballPosition[2]
+                << ',' << ballVelocity[0] << ',' << ballVelocity[2] << ',' << ballPosition[1];
+            const auto writeRobot = [&sample](webots::Node *node, webots::Node *camera,
+                const common::msg::Location &observation,
+                const std::shared_ptr<TalkCapture> &talk) {
+                const double *position = node->getPosition();
+                const double *velocity = node->getVelocity();
+                sample << ',' << position[0] << ',' << position[2]
+                    << ',' << velocity[0] << ',' << velocity[2] << ',' << velocity[4]
+                    << ',' << observation.x << ',' << observation.z << ',' << talk->sequence()
+                    << ',' << csvQuote(talk->latest());
+                if (camera) {
+                    const double *cameraPosition = camera->getPosition();
+                    const double *orientation = camera->getOrientation();
+                    sample << ',' << cameraPosition[0] << ',' << cameraPosition[1]
+                        << ',' << cameraPosition[2];
+                    for (int element = 0; element < 9; ++element) {
+                        sample << ',' << orientation[element];
+                    }
+                } else {
+                    for (int element = 0; element < 12; ++element) sample << ',';
+                }
+            };
+            writeRobot(redPlayers[0], cameras[0], locRed_[0], talkCaptures[0]);
+            writeRobot(redPlayers[1], cameras[1], locRed_[1], talkCaptures[1]);
+            writeRobot(bluePlayers[0], cameras[2], locBlue_[0], talkCaptures[2]);
+            writeRobot(bluePlayers[1], cameras[3], locBlue_[1], talkCaptures[3]);
+            trace << sample.str() << '\n';
+            if (++traceRows % 100 == 0) trace.flush();
+        }
     }
     return 0;
 }

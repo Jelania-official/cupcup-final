@@ -1,4 +1,5 @@
 uint32 stamp
+# Webots simulation time in milliseconds (uint32 wraparound).
 float32 pitch
 float32 roll
 float32 yaw

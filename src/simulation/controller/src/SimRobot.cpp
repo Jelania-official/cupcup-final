@@ -22,6 +22,10 @@ SimRobot::SimRobot(std::string robot_name) : Robot(), robotName(robot_name)
     mCamera->enable(5 * mTimeStep);
     mIMU = getInertialUnit("IMU");
     mIMU->enable(mTimeStep);
+    mNeckYawSensor = getPositionSensor("NeckS");
+    mNeckPitchSensor = getPositionSensor("Neck2S");
+    mNeckYawSensor->enable(mTimeStep);
+    mNeckPitchSensor->enable(mTimeStep);
     mLEDs.resize(2);
     mLEDs[0] = getLED("Led0");
     mLEDs[1] = getLED("Led1");
@@ -44,16 +48,26 @@ int SimRobot::myStep()
     mLEDs[0]->set(0xff0000*ledTask.led1);
     mLEDs[1]->set(0xff0000*ledTask.led2);
     setPositions();
+    // Read sensors only AFTER the step that refreshes their buffers. Publishing
+    // on the pre-step counter used the previous camera frame (80 ms old for a
+    // 20 ms world step) while stamping it with the current simulation time.
+    const int result = step(mTimeStep);
+    if (result < 0) return result;
     checkFall();
     totalTime += mTimeStep;
     if (totalTime % (5 * mTimeStep) == 0) {
-        mImagePublisher->Publish(mCamera->getImage(), mCamera->getWidth(), mCamera->getHeight());
+        mImagePublisher->Publish(mCamera->getImage(), mCamera->getWidth(),
+            mCamera->getHeight(), getTime());
     }
-    mHeadPublisher->Publish(mHAngles);
+    HeadAngles measuredHead;
+    measuredHead.yaw = seumath::rad2deg(mNeckYawSensor->getValue());
+    measuredHead.pitch = -seumath::rad2deg(mNeckPitchSensor->getValue());
+    measuredHead.time = static_cast<uint32_t>(getTime() * 1000.0);
+    mHeadPublisher->Publish(measuredHead);
     rclcpp::spin_some(mImagePublisher);
     rclcpp::spin_some(mImuPublisher);
     rclcpp::spin_some(mHeadPublisher);
-    return step(mTimeStep);
+    return result;
 }
 
 void SimRobot::checkFall()
@@ -74,7 +88,7 @@ void SimRobot::checkFall()
     imu.pitch = seumath::rad2deg(rpy[1]);
     imu.roll = seumath::rad2deg(rpy[0]);
     imu.fall = fallType;
-    imu.stamp = rclcpp::Time().nanoseconds();
+    imu.stamp = static_cast<uint32_t>(getTime() * 1000.0);
     mImuPublisher->Publish(imu);
 }
 
@@ -129,5 +143,3 @@ void SimRobot::setPositions()
     motor = getMotor(Neck[0]);
     motor->setPosition(seumath::deg2rad(mHAngles.yaw));
 }
-
-

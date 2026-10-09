@@ -291,6 +291,7 @@ int main(int argc, char **argv)
             float noiseRad = randRad(random);
             locRed_[i].x = redpos[0] + noiseDis * sin(noiseRad);
             locRed_[i].z = redpos[2] + noiseDis * cos(noiseRad);
+            locRed_[i].stamp = static_cast<uint32_t>(super->getTime() * 1000.0);
             locPublisherRed_[i]->Publish(locRed_[i]);
         }
 
@@ -300,6 +301,7 @@ int main(int argc, char **argv)
             float noiseRad = randRad(random);
             locBlue_[i].x = bluepos[0] + noiseDis * sin(noiseRad);
             locBlue_[i].z = bluepos[2] + noiseDis * cos(noiseRad);
+            locBlue_[i].stamp = static_cast<uint32_t>(super->getTime() * 1000.0);
             locPublisherBlue_[i]->Publish(locBlue_[i]);
         }    
         fieldPublisher->Publish(fieldData);

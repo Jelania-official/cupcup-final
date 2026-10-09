@@ -6,6 +6,8 @@
 #include "WebotsUtils.hpp"
 #include "SimRobot.hpp"
 #include <unistd.h>
+#include <chrono>
+#include <cstdint>
 
 
 using namespace std;
@@ -36,6 +38,8 @@ int main(int argc, char **argv)
     using GetAnglesFuture = rclcpp::Client<common::srv::GetAngles>::SharedFuture;
     GetAnglesFuture pendingResult;
     bool requestPending = false;
+    int64_t pendingRequestId = 0;
+    auto pendingSince = std::chrono::steady_clock::now();
     while (rclcpp::ok() && ret >= 0) {
         // Do not block Webots before its first step. Keep one request in
         // flight and give ROS a small window on each cycle, then advance
@@ -45,6 +49,8 @@ int main(int argc, char **argv)
             auto request = std::make_shared<common::srv::GetAngles::Request>();
             auto requestHandle = client->async_send_request(request);
             pendingResult = requestHandle.future.share();
+            pendingRequestId = requestHandle.request_id;
+            pendingSince = std::chrono::steady_clock::now();
             requestPending = true;
         }
         const auto resultCode = rclcpp::spin_until_future_complete(
@@ -56,6 +62,14 @@ int main(int argc, char **argv)
             requestPending = false;
         } else if (resultCode == rclcpp::FutureReturnCode::INTERRUPTED) {
             break;
+        } else if (std::chrono::steady_clock::now() - pendingSince >
+                   std::chrono::seconds(1)) {
+            // A lost service reply must not leave the robot frozen while its
+            // camera and IMU continue to report healthy samples.
+            client->remove_pending_request(pendingRequestId);
+            requestPending = false;
+            RCLCPP_WARN(node->get_logger(),
+                "%s/get_angles timed out; retrying motion request", robotName.c_str());
         }
         ret = player->myStep();
     }

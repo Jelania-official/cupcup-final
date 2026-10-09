@@ -1421,7 +1421,7 @@ Robot {
                                         ]
                                       }
                                     }
-                                    Camera {
+                                    DEF CupcupCamera Camera {
                                       translation 0 0.005 0.015
                                       rotation 0 0 1 1.57
                                       name "Camera"

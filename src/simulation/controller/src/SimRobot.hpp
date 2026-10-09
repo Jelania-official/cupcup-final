@@ -17,6 +17,7 @@
 #include <sensor_msgs/image_encodings.hpp>
 
 #include <rclcpp/rclcpp.hpp>
+#include <cstdint>
 
 class ImagePublisher : public rclcpp::Node
 {
@@ -26,10 +27,12 @@ public:
         publisher_ = this->create_publisher<sensor_msgs::msg::Image>(robot_name + "/sensor/image", 5);
     }
 
-    void Publish(const unsigned char* data, int w, int h)
+    void Publish(const unsigned char* data, int w, int h, double simulationTime)
     {
         auto message = sensor_msgs::msg::Image();
-        message.header.stamp = rclcpp::Time();
+        const auto nanoseconds = static_cast<int64_t>(simulationTime * 1e9);
+        message.header.stamp.sec = static_cast<int32_t>(nanoseconds / 1000000000LL);
+        message.header.stamp.nanosec = static_cast<uint32_t>(nanoseconds % 1000000000LL);
         message.header.frame_id = "simulation";
         message.width = w;
         message.height = h;
@@ -105,6 +108,8 @@ private:
 
     webots::Camera *mCamera;
     webots::InertialUnit *mIMU;
+    webots::PositionSensor *mNeckYawSensor;
+    webots::PositionSensor *mNeckPitchSensor;
     std::vector<webots::LED*> mLEDs;
 
     common::msg::LedTask ledTask;
