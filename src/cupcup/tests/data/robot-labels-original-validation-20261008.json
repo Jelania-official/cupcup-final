@@ -1,0 +1,19 @@
+{
+  "schema": "cupcup-visible-robot-labels-v1",
+  "source_match": "20261008-090719-red-vs-cupcup/images",
+  "annotation_method": "Codex visual review before detector replay; visible extents, not supervisor labels or expert consensus",
+  "sampling": "Four uniform images per observer, sorted filename index floor(i*n/4); new original-input match after freezing production candidate; all holdout",
+  "width": 640,
+  "height": 480,
+  "limitations": ["Eight correlated images from a short match; few close/occluded targets", "Test-only UDP transport; original sensor payloads, zero header timestamps", "Approximate labels need independent human review", "No global position/capture-time truth labels"],
+  "frames": [
+    {"image": "red_1_receipt_000000970.jpg", "sha256": "9a577ff778993b4394378d4b9ea110dbf62f0d891f21b597f830f9f108f22341", "split": "holdout", "robots": [{"xyxy": [252, 96, 273, 149], "team": "red", "visibility": "full"}, {"xyxy": [566, 91, 594, 144], "team": "blue", "visibility": "full"}]},
+    {"image": "red_1_receipt_000024612.jpg", "sha256": "4d1dd43e357f251dd0615a82e81d95b704b053b809209a58006757f12a538f08", "split": "holdout", "robots": [{"xyxy": [11, 123, 51, 186], "team": "red", "visibility": "full"}, {"xyxy": [340, 90, 362, 135], "team": "blue", "visibility": "full"}]},
+    {"image": "red_1_receipt_000048161.jpg", "sha256": "a07a86e92750e525a8ce8effdd60438b2e5aa27bbe63fcabb3c5e00d21d594ec", "split": "holdout", "robots": [{"xyxy": [0, 64, 47, 155], "team": "red", "visibility": "clipped"}, {"xyxy": [438, 86, 479, 151], "team": "blue", "visibility": "full"}]},
+    {"image": "red_1_receipt_000070945.jpg", "sha256": "b0378232222e3ce8ad4f7854929d68ee1a13bc818de96f8c1f674375e4ea13e0", "split": "holdout", "robots": []},
+    {"image": "red_2_receipt_000000984.jpg", "sha256": "e202ae3e2e7b065ff9b542067b688ee76c7250e021c78c22b98f55551ada89dc", "split": "holdout", "robots": [{"xyxy": [252, 98, 273, 149], "team": "red", "visibility": "full"}, {"xyxy": [43, 102, 68, 152], "team": "blue", "visibility": "full"}]},
+    {"image": "red_2_receipt_000022022.jpg", "sha256": "9c1906393f4f291cd693c330f3570d63d5f86712ab46942213da35844294d6ea", "split": "holdout", "robots": [{"xyxy": [431, 10, 457, 66], "team": "blue", "visibility": "full"}]},
+    {"image": "red_2_receipt_000046240.jpg", "sha256": "e750d029081d21af56223e804880a2a3e67e70865b14d41ca2e60867f3982a2e", "split": "holdout", "robots": [{"xyxy": [122, 40, 161, 126], "team": "blue", "visibility": "full"}, {"xyxy": [541, 0, 579, 64], "team": "blue", "visibility": "clipped"}]},
+    {"image": "red_2_receipt_000069043.jpg", "sha256": "caa541e2f57180fac729c838dd170720a9df27c31672bdc32f7fefa8c6cbb32c", "split": "holdout", "robots": [{"xyxy": [133, 63, 165, 145], "team": "blue", "visibility": "full"}, {"xyxy": [432, 16, 471, 103], "team": "blue", "visibility": "full"}, {"xyxy": [602, 0, 640, 114], "team": "red", "visibility": "clipped"}]}
+  ]
+}

@@ -1,0 +1,1069 @@
+{
+  "schema": "cupcup-controlled-calibration-v1",
+  "sources": [
+    {
+      "directory": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+      "color": "red",
+      "manifest": {
+        "arguments": {
+          "color": "red",
+          "repeats": 3,
+          "timeout": 700.0,
+          "output": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+          "controller_adapter": true,
+          "released_source": "/home/j/.cache/cupcup/upstream-validation/seurobocup-kidsize2026Fin"
+        },
+        "install": "/home/j/.cache/cupcup/upstream-validation/install",
+        "sha256": {
+          "measurement": "d2a09bacd4ab78e00eaf7360062d68236dc13090d4f582ff606adfd505557585",
+          "controller": "5fa32f0a915b6f2e62ff12783da59ddc4b5d34ac520702b72fcca6e37d38a547",
+          "motion": "c512a4cc4e6a9772e59cd83ced85bddbca2290e2c87107577ea6f74bf196fc3c",
+          "robot_model": "c6f7cc3f29f41240a5454be1ecda58182eecbab2a1a8bdd9ead211e8e40c0fbf",
+          "ball_model": "994356a545c60b1942dcc4fcf04ac84823763db0a5b6957604b59ea02e28759a",
+          "walk": "1dffd39c0072f0db7b567c88c4058e33b611d1e8d9ffb629af537fbfb90d93c8",
+          "actions": "9f12aae135fd050ff131f3a8faa7c5337f2fff1ad2d0f73ac41c818344c194bb",
+          "controller_adapter": "1579e66b9dd54b80a5b0c409a6f2a804bcd7f4dad4fd11daffd8eb7e29f8178f",
+          "released_sensor_source": "cf9ad2308c3bfa8037bd1f0b9ff4732b2f1f80edf45981e37a81b0c1359ab090"
+        },
+        "clock": "Webots simulation seconds",
+        "competition_strategy_running": false
+      },
+      "csv_sha256": {
+        "trials.csv": "a3dea64e2823db81f17151db25fc168ca732daa7dca993936a4f87d66d9f49fe",
+        "motion_trace.csv": "9f74f91d43d6dfce1976722b82340afda665f3879474b96d37c34d2cf4996942"
+      }
+    },
+    {
+      "directory": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+      "color": "blue",
+      "manifest": {
+        "arguments": {
+          "color": "blue",
+          "repeats": 3,
+          "timeout": 700.0,
+          "stall_timeout": 90.0,
+          "output": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+          "controller_adapter": true,
+          "released_source": "/home/j/.cache/cupcup/upstream-validation/seurobocup-kidsize2026Fin"
+        },
+        "install": "/home/j/.cache/cupcup/upstream-validation/install",
+        "sha256": {
+          "measurement": "d2a09bacd4ab78e00eaf7360062d68236dc13090d4f582ff606adfd505557585",
+          "measurement_source": "a7fb28473e84c87ef8f3e4f4a96714735cd3219fbc7fff164b6463333e0d374f",
+          "measurement_launch": "d04dd54b2246e31bfb569a34ee180ddd5cca0a9666798786873312c62c12bc4c",
+          "measurement_runner": "4549abc9335ab6df65479fb171ae89999adc7711376a4546649cc5208f7e18ba",
+          "controller": "5fa32f0a915b6f2e62ff12783da59ddc4b5d34ac520702b72fcca6e37d38a547",
+          "motion": "c512a4cc4e6a9772e59cd83ced85bddbca2290e2c87107577ea6f74bf196fc3c",
+          "robot_model": "c6f7cc3f29f41240a5454be1ecda58182eecbab2a1a8bdd9ead211e8e40c0fbf",
+          "ball_model": "994356a545c60b1942dcc4fcf04ac84823763db0a5b6957604b59ea02e28759a",
+          "walk": "1dffd39c0072f0db7b567c88c4058e33b611d1e8d9ffb629af537fbfb90d93c8",
+          "actions": "9f12aae135fd050ff131f3a8faa7c5337f2fff1ad2d0f73ac41c818344c194bb",
+          "controller_adapter": "1579e66b9dd54b80a5b0c409a6f2a804bcd7f4dad4fd11daffd8eb7e29f8178f",
+          "adapter_source": "f7934763b47e3c08d6c194f703d0edfeb9c83515f125e475f770165a34fc887e",
+          "released_sensor_source": "cf9ad2308c3bfa8037bd1f0b9ff4732b2f1f80edf45981e37a81b0c1359ab090"
+        },
+        "clock": "Webots simulation seconds",
+        "competition_strategy_running": false
+      },
+      "csv_sha256": {
+        "trials.csv": "0b2be6a605b8dd8b11317b7963e0f9a1a8e937d7e2c1e90f9e1c6de5df5f90cc",
+        "motion_trace.csv": "71398ac8518c02c9f6e52242f97379811535eefaea2fb8a0605deea4fcb4763d"
+      }
+    }
+  ],
+  "limitations": [
+    "small repeated samples, not population confidence intervals",
+    "body-turn command 10 degrees only; not maximum turn capability",
+    "kick onset omits approach/alignment/stabilization time",
+    "acceleration, latency, collision and occlusion uncalibrated",
+    "bounded waits change scheduling, not sensor or physics sources"
+  ],
+  "motion": {
+    "walk:0.025": {
+      "trials": [
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+          "color": "red",
+          "repeat": 0,
+          "duration_s": 6.0,
+          "net_speed_m_s": 0.06379325686978046,
+          "forward_speed_m_s": 0.06376083333333334,
+          "lateral_speed_m_s": 0.0020336555,
+          "net_turn_deg_s": -0.008999999999995604,
+          "fall": false
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+          "color": "red",
+          "repeat": 1,
+          "duration_s": 6.0,
+          "net_speed_m_s": 0.06358477001275813,
+          "forward_speed_m_s": 0.0635845,
+          "lateral_speed_m_s": -0.00018530333333333332,
+          "net_turn_deg_s": 0.016833333333356865,
+          "fall": false
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+          "color": "red",
+          "repeat": 2,
+          "duration_s": 6.0,
+          "net_speed_m_s": 0.06459393646810394,
+          "forward_speed_m_s": 0.06458766666666667,
+          "lateral_speed_m_s": 0.0008999683333333333,
+          "net_turn_deg_s": 0.1629999999999825,
+          "fall": false
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+          "color": "blue",
+          "repeat": 0,
+          "duration_s": 6.0,
+          "net_speed_m_s": 0.0639070824611531,
+          "forward_speed_m_s": 0.06387783333333334,
+          "lateral_speed_m_s": -0.0019332866666666667,
+          "net_turn_deg_s": 0.05972183333336053,
+          "fall": false
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+          "color": "blue",
+          "repeat": 1,
+          "duration_s": 6.0,
+          "net_speed_m_s": 0.06455350159562645,
+          "forward_speed_m_s": 0.06455333333333335,
+          "lateral_speed_m_s": -0.00014739000000000006,
+          "net_turn_deg_s": 0.11216506666665775,
+          "fall": false
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+          "color": "blue",
+          "repeat": 2,
+          "duration_s": 6.0,
+          "net_speed_m_s": 0.0634364393104399,
+          "forward_speed_m_s": 0.06342433333333335,
+          "lateral_speed_m_s": 0.0012392633333333334,
+          "net_turn_deg_s": 0.07510833333331846,
+          "fall": false
+        }
+      ],
+      "stable_net_speed_m_s": {
+        "n": 6,
+        "min": 0.0634364393104399,
+        "median": 0.06385016966546678,
+        "mean": 0.063978164452977,
+        "p95": 0.06458382774998456,
+        "max": 0.06459393646810394
+      },
+      "stable_forward_m_s": {
+        "n": 6,
+        "min": 0.06342433333333335,
+        "median": 0.06381933333333334,
+        "mean": 0.06396475000000001,
+        "p95": 0.06457908333333334,
+        "max": 0.06458766666666667
+      },
+      "stable_turn_deg_s": {
+        "n": 6,
+        "min": -0.008999999999995604,
+        "median": 0.0674150833333395,
+        "mean": 0.06963809444444675,
+        "p95": 0.15029126666665132,
+        "max": 0.1629999999999825
+      },
+      "falls": 0
+    },
+    "walk:0.05": {
+      "trials": [
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+          "color": "red",
+          "repeat": 0,
+          "duration_s": 6.0,
+          "net_speed_m_s": 0.12169817078807449,
+          "forward_speed_m_s": 0.12167250000000002,
+          "lateral_speed_m_s": -0.0024995033333333333,
+          "net_turn_deg_s": -0.8431666666666473,
+          "fall": false
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+          "color": "red",
+          "repeat": 1,
+          "duration_s": 6.0,
+          "net_speed_m_s": 0.12065028632123388,
+          "forward_speed_m_s": 0.12059883333333332,
+          "lateral_speed_m_s": 0.003523207066666666,
+          "net_turn_deg_s": -0.1928333333333351,
+          "fall": false
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+          "color": "red",
+          "repeat": 2,
+          "duration_s": 6.0,
+          "net_speed_m_s": 0.11860031744277945,
+          "forward_speed_m_s": 0.11857983333333333,
+          "lateral_speed_m_s": -0.0022041833333333333,
+          "net_turn_deg_s": -0.5438333333333484,
+          "fall": false
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+          "color": "blue",
+          "repeat": 0,
+          "duration_s": 6.0,
+          "net_speed_m_s": 0.12059033174209577,
+          "forward_speed_m_s": 0.1205585,
+          "lateral_speed_m_s": -0.002770593333333333,
+          "net_turn_deg_s": -0.2570928333332982,
+          "fall": false
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+          "color": "blue",
+          "repeat": 1,
+          "duration_s": 6.0,
+          "net_speed_m_s": 0.12200247855405388,
+          "forward_speed_m_s": 0.12199016666666668,
+          "lateral_speed_m_s": -0.001733208,
+          "net_turn_deg_s": 0.1544553333333075,
+          "fall": false
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+          "color": "blue",
+          "repeat": 2,
+          "duration_s": 6.0,
+          "net_speed_m_s": 0.1232865332509203,
+          "forward_speed_m_s": 0.1232045,
+          "lateral_speed_m_s": -0.004496716666666667,
+          "net_turn_deg_s": -0.8896039999999866,
+          "fall": false
+        }
+      ],
+      "stable_net_speed_m_s": {
+        "n": 6,
+        "min": 0.11860031744277945,
+        "median": 0.12117422855465418,
+        "mean": 0.12113801968319296,
+        "p95": 0.1229655195767037,
+        "max": 0.1232865332509203
+      },
+      "stable_forward_m_s": {
+        "n": 6,
+        "min": 0.11857983333333333,
+        "median": 0.12113566666666667,
+        "mean": 0.12110072222222222,
+        "p95": 0.12290091666666667,
+        "max": 0.1232045
+      },
+      "stable_turn_deg_s": {
+        "n": 6,
+        "min": -0.8896039999999866,
+        "median": -0.40046308333332326,
+        "mean": -0.4286791388888847,
+        "p95": 0.06763316666664684,
+        "max": 0.1544553333333075
+      },
+      "falls": 0
+    },
+    "turn:10": {
+      "trials": [
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+          "color": "red",
+          "repeat": 0,
+          "duration_s": 6.0,
+          "net_speed_m_s": 0.007359213184769741,
+          "forward_speed_m_s": -0.004901666666666656,
+          "lateral_speed_m_s": 0.005489233333333334,
+          "net_turn_deg_s": 15.636816666666684,
+          "fall": false
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+          "color": "red",
+          "repeat": 1,
+          "duration_s": 6.0,
+          "net_speed_m_s": 0.006981667647091506,
+          "forward_speed_m_s": -0.0036449999999999725,
+          "lateral_speed_m_s": 0.005954633333333334,
+          "net_turn_deg_s": 15.684783333333348,
+          "fall": false
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+          "color": "red",
+          "repeat": 2,
+          "duration_s": 6.0,
+          "net_speed_m_s": 0.00656274732520187,
+          "forward_speed_m_s": -0.003939999999999981,
+          "lateral_speed_m_s": 0.005248433333333333,
+          "net_turn_deg_s": 15.924399999999997,
+          "fall": false
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+          "color": "blue",
+          "repeat": 0,
+          "duration_s": 6.0,
+          "net_speed_m_s": 0.008047906210865593,
+          "forward_speed_m_s": -0.004791666666666676,
+          "lateral_speed_m_s": 0.006465966666666667,
+          "net_turn_deg_s": 15.854599999999985,
+          "fall": false
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+          "color": "blue",
+          "repeat": 1,
+          "duration_s": 6.0,
+          "net_speed_m_s": 0.0065207686861331994,
+          "forward_speed_m_s": -0.004243333333333303,
+          "lateral_speed_m_s": 0.004951216666666667,
+          "net_turn_deg_s": 15.14691666666665,
+          "fall": false
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+          "color": "blue",
+          "repeat": 2,
+          "duration_s": 6.0,
+          "net_speed_m_s": 0.008653392554512933,
+          "forward_speed_m_s": -0.004019999999999986,
+          "lateral_speed_m_s": 0.007662949999999999,
+          "net_turn_deg_s": 16.020350000000004,
+          "fall": false
+        }
+      ],
+      "stable_net_speed_m_s": {
+        "n": 6,
+        "min": 0.0065207686861331994,
+        "median": 0.007170440415930623,
+        "mean": 0.00735428260142914,
+        "p95": 0.008502020968601098,
+        "max": 0.008653392554512933
+      },
+      "stable_forward_m_s": {
+        "n": 6,
+        "min": -0.004901666666666656,
+        "median": -0.004131666666666645,
+        "mean": -0.004256944444444429,
+        "p95": -0.0037187499999999747,
+        "max": -0.0036449999999999725
+      },
+      "stable_turn_deg_s": {
+        "n": 6,
+        "min": 15.14691666666665,
+        "median": 15.769691666666667,
+        "mean": 15.711311111111112,
+        "p95": 15.996362500000002,
+        "max": 16.020350000000004
+      },
+      "falls": 0
+    }
+  },
+  "kicks": {
+    "left_kick:0.18:0.08": {
+      "trials": [
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+          "color": "red",
+          "repeat": 0,
+          "distance_m": 1.66329,
+          "forward_m": 1.65925,
+          "left_m": -0.115898,
+          "direction_deg": -3.995599343908859,
+          "peak_speed_m_s": 1.16982,
+          "pre_drift_m": 9.00773e-09,
+          "fall": false,
+          "contact": true,
+          "clean_start": true,
+          "strict_success": true,
+          "command_to_ball_movement_s": 1.0399999999999991
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+          "color": "red",
+          "repeat": 1,
+          "distance_m": 1.66263,
+          "forward_m": 1.65857,
+          "left_m": -0.116126,
+          "direction_deg": -4.005070175307039,
+          "peak_speed_m_s": 1.16981,
+          "pre_drift_m": 2.93954e-09,
+          "fall": false,
+          "contact": true,
+          "clean_start": true,
+          "strict_success": true,
+          "command_to_ball_movement_s": 1.0600000000000023
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+          "color": "red",
+          "repeat": 2,
+          "distance_m": 1.66414,
+          "forward_m": 1.66014,
+          "left_m": -0.115269,
+          "direction_deg": -3.971860521135861,
+          "peak_speed_m_s": 1.17001,
+          "pre_drift_m": 3.27204e-09,
+          "fall": false,
+          "contact": true,
+          "clean_start": true,
+          "strict_success": true,
+          "command_to_ball_movement_s": 1.0200000000000387
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+          "color": "blue",
+          "repeat": 0,
+          "distance_m": 1.66261,
+          "forward_m": 1.65856,
+          "left_m": -0.115992,
+          "direction_deg": -4.000487704419839,
+          "peak_speed_m_s": 1.16982,
+          "pre_drift_m": 9.00773e-09,
+          "fall": false,
+          "contact": true,
+          "clean_start": true,
+          "strict_success": true,
+          "command_to_ball_movement_s": 1.0599999999999952
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+          "color": "blue",
+          "repeat": 1,
+          "distance_m": 1.66223,
+          "forward_m": 1.65812,
+          "left_m": -0.116785,
+          "direction_deg": -4.028813328095706,
+          "peak_speed_m_s": 1.16946,
+          "pre_drift_m": 1.54978e-08,
+          "fall": false,
+          "contact": true,
+          "clean_start": true,
+          "strict_success": true,
+          "command_to_ball_movement_s": 1.0600000000000023
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+          "color": "blue",
+          "repeat": 2,
+          "distance_m": 1.6629,
+          "forward_m": 1.65889,
+          "left_m": -0.115408,
+          "direction_deg": -3.9796215641667456,
+          "peak_speed_m_s": 1.17009,
+          "pre_drift_m": 1.63825e-08,
+          "fall": false,
+          "contact": true,
+          "clean_start": true,
+          "strict_success": true,
+          "command_to_ball_movement_s": 1.0600000000000023
+        }
+      ],
+      "contacts": 6,
+      "strict_successes": 6,
+      "falls": 0,
+      "distance_m": {
+        "n": 6,
+        "min": 1.66223,
+        "median": 1.662765,
+        "mean": 1.6629666666666667,
+        "p95": 1.6639275,
+        "max": 1.66414
+      },
+      "direction_deg": {
+        "n": 6,
+        "min": -4.028813328095706,
+        "median": -3.998043524164349,
+        "mean": -3.9969087728390083,
+        "p95": -3.973800781893582,
+        "max": -3.971860521135861
+      },
+      "peak_speed_m_s": {
+        "n": 6,
+        "min": 1.16946,
+        "median": 1.16982,
+        "mean": 1.169835,
+        "p95": 1.17007,
+        "max": 1.17009
+      },
+      "pre_drift_m": {
+        "n": 6,
+        "min": 2.93954e-09,
+        "median": 9.00773e-09,
+        "mean": 9.351223333333333e-09,
+        "p95": 1.6161325000000003e-08,
+        "max": 1.63825e-08
+      },
+      "command_to_ball_movement_s": {
+        "n": 6,
+        "min": 1.0200000000000387,
+        "median": 1.0599999999999987,
+        "mean": 1.0500000000000067,
+        "p95": 1.0600000000000023,
+        "max": 1.0600000000000023
+      }
+    },
+    "right_kick:0.18:-0.04": {
+      "trials": [
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+          "color": "red",
+          "repeat": 0,
+          "distance_m": 1.42372,
+          "forward_m": 1.4236,
+          "left_m": -0.0185007,
+          "direction_deg": -0.7445577124410467,
+          "peak_speed_m_s": 0.983908,
+          "pre_drift_m": 0.0359968,
+          "fall": false,
+          "contact": true,
+          "clean_start": false,
+          "strict_success": false,
+          "command_to_ball_movement_s": 0.8200000000000074
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+          "color": "red",
+          "repeat": 1,
+          "distance_m": 1.42422,
+          "forward_m": 1.42417,
+          "left_m": -0.0122478,
+          "direction_deg": -0.49272906243940023,
+          "peak_speed_m_s": 0.984047,
+          "pre_drift_m": 0.0362908,
+          "fall": false,
+          "contact": true,
+          "clean_start": false,
+          "strict_success": false,
+          "command_to_ball_movement_s": 0.799999999999983
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+          "color": "red",
+          "repeat": 2,
+          "distance_m": 1.42307,
+          "forward_m": 1.42292,
+          "left_m": -0.0208753,
+          "direction_deg": -0.840511614858066,
+          "peak_speed_m_s": 0.983413,
+          "pre_drift_m": 0.0358806,
+          "fall": false,
+          "contact": true,
+          "clean_start": false,
+          "strict_success": false,
+          "command_to_ball_movement_s": 0.8199999999999932
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+          "color": "blue",
+          "repeat": 0,
+          "distance_m": 1.42507,
+          "forward_m": 1.42505,
+          "left_m": -0.00814019,
+          "direction_deg": -0.3272821716910076,
+          "peak_speed_m_s": 0.984704,
+          "pre_drift_m": 0.0364752,
+          "fall": false,
+          "contact": true,
+          "clean_start": false,
+          "strict_success": false,
+          "command_to_ball_movement_s": 0.7999999999999972
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+          "color": "blue",
+          "repeat": 1,
+          "distance_m": 1.42487,
+          "forward_m": 1.42475,
+          "left_m": -0.0188875,
+          "direction_deg": -0.7595091407867048,
+          "peak_speed_m_s": 0.984816,
+          "pre_drift_m": 0.0361045,
+          "fall": false,
+          "contact": true,
+          "clean_start": false,
+          "strict_success": false,
+          "command_to_ball_movement_s": 0.8199999999999932
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+          "color": "blue",
+          "repeat": 2,
+          "distance_m": 1.42599,
+          "forward_m": 1.42599,
+          "left_m": 0.00213151,
+          "direction_deg": 0.08564326259947268,
+          "peak_speed_m_s": 0.985633,
+          "pre_drift_m": 0.0367293,
+          "fall": false,
+          "contact": true,
+          "clean_start": false,
+          "strict_success": false,
+          "command_to_ball_movement_s": 0.8199999999999932
+        }
+      ],
+      "contacts": 6,
+      "strict_successes": 0,
+      "falls": 0,
+      "distance_m": {
+        "n": 6,
+        "min": 1.42307,
+        "median": 1.4245450000000002,
+        "mean": 1.42449,
+        "p95": 1.4257600000000001,
+        "max": 1.42599
+      },
+      "direction_deg": {
+        "n": 6,
+        "min": -0.840511614858066,
+        "median": -0.6186433874402235,
+        "mean": -0.5131577399361255,
+        "p95": -0.017588095973147366,
+        "max": 0.08564326259947268
+      },
+      "peak_speed_m_s": {
+        "n": 6,
+        "min": 0.983413,
+        "median": 0.9843755000000001,
+        "mean": 0.9844201666666667,
+        "p95": 0.98542875,
+        "max": 0.985633
+      },
+      "pre_drift_m": {
+        "n": 6,
+        "min": 0.0358806,
+        "median": 0.03619765,
+        "mean": 0.0362462,
+        "p95": 0.036665775,
+        "max": 0.0367293
+      },
+      "command_to_ball_movement_s": {
+        "n": 6,
+        "min": 0.799999999999983,
+        "median": 0.8199999999999932,
+        "mean": 0.8133333333333278,
+        "p95": 0.8200000000000038,
+        "max": 0.8200000000000074
+      }
+    },
+    "right_kick:0.22:-0.04": {
+      "trials": [
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+          "color": "red",
+          "repeat": 0,
+          "distance_m": 1.23749,
+          "forward_m": 1.2354,
+          "left_m": 0.0718832,
+          "direction_deg": 3.3300674864122826,
+          "peak_speed_m_s": 0.830982,
+          "pre_drift_m": 0.0204672,
+          "fall": false,
+          "contact": true,
+          "clean_start": true,
+          "strict_success": true,
+          "command_to_ball_movement_s": 0.8400000000000034
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+          "color": "red",
+          "repeat": 1,
+          "distance_m": 1.23734,
+          "forward_m": 1.23519,
+          "left_m": 0.0728927,
+          "direction_deg": 3.3772989679705088,
+          "peak_speed_m_s": 0.828507,
+          "pre_drift_m": 0.0207622,
+          "fall": false,
+          "contact": true,
+          "clean_start": true,
+          "strict_success": true,
+          "command_to_ball_movement_s": 0.8400000000000034
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+          "color": "red",
+          "repeat": 2,
+          "distance_m": 1.23696,
+          "forward_m": 1.23492,
+          "left_m": 0.0711044,
+          "direction_deg": 3.295346159648745,
+          "peak_speed_m_s": 0.836239,
+          "pre_drift_m": 0.0201104,
+          "fall": false,
+          "contact": true,
+          "clean_start": true,
+          "strict_success": true,
+          "command_to_ball_movement_s": 0.8199999999999932
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+          "color": "blue",
+          "repeat": 0,
+          "distance_m": 1.23606,
+          "forward_m": 1.23396,
+          "left_m": 0.0718975,
+          "direction_deg": 3.3346065676340895,
+          "peak_speed_m_s": 0.825182,
+          "pre_drift_m": 0.021266,
+          "fall": false,
+          "contact": true,
+          "clean_start": true,
+          "strict_success": true,
+          "command_to_ball_movement_s": 0.8400000000000034
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+          "color": "blue",
+          "repeat": 1,
+          "distance_m": 1.23814,
+          "forward_m": 1.23599,
+          "left_m": 0.0728691,
+          "direction_deg": 3.3740278359811233,
+          "peak_speed_m_s": 0.827535,
+          "pre_drift_m": 0.021071,
+          "fall": false,
+          "contact": true,
+          "clean_start": true,
+          "strict_success": true,
+          "command_to_ball_movement_s": 0.799999999999983
+        },
+        {
+          "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+          "color": "blue",
+          "repeat": 2,
+          "distance_m": 1.23555,
+          "forward_m": 1.23353,
+          "left_m": 0.0707204,
+          "direction_deg": 3.2812737913553525,
+          "peak_speed_m_s": 0.823614,
+          "pre_drift_m": 0.021911,
+          "fall": false,
+          "contact": true,
+          "clean_start": true,
+          "strict_success": true,
+          "command_to_ball_movement_s": 0.8400000000000318
+        }
+      ],
+      "contacts": 6,
+      "strict_successes": 6,
+      "falls": 0,
+      "distance_m": {
+        "n": 6,
+        "min": 1.23555,
+        "median": 1.2371500000000002,
+        "mean": 1.2369233333333334,
+        "p95": 1.2379775,
+        "max": 1.23814
+      },
+      "direction_deg": {
+        "n": 6,
+        "min": 3.2812737913553525,
+        "median": 3.3323370270231862,
+        "mean": 3.332103468167017,
+        "p95": 3.376481184973162,
+        "max": 3.3772989679705088
+      },
+      "peak_speed_m_s": {
+        "n": 6,
+        "min": 0.823614,
+        "median": 0.828021,
+        "mean": 0.8286765,
+        "p95": 0.83492475,
+        "max": 0.836239
+      },
+      "pre_drift_m": {
+        "n": 6,
+        "min": 0.0201104,
+        "median": 0.0209166,
+        "mean": 0.0209313,
+        "p95": 0.021749749999999998,
+        "max": 0.021911
+      },
+      "command_to_ball_movement_s": {
+        "n": 6,
+        "min": 0.799999999999983,
+        "median": 0.8400000000000034,
+        "mean": 0.8300000000000031,
+        "p95": 0.8400000000000247,
+        "max": 0.8400000000000318
+      }
+    }
+  },
+  "rolling": {
+    "training_trials": 4,
+    "heldout_trials": 8,
+    "models": {
+      "exponential": {
+        "rate": 0.6960069112439948,
+        "rate_unit": "1/s",
+        "training": {
+          "trials": [
+            {
+              "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+              "repeat": 0,
+              "command_m_s": 0.9,
+              "speed_rmse_m_s": 0.004565289565702871,
+              "position_rmse_m": 0.005352552047162825
+            },
+            {
+              "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+              "repeat": 0,
+              "command_m_s": 1.5,
+              "speed_rmse_m_s": 0.0035927647064742455,
+              "position_rmse_m": 0.013222050411207751
+            },
+            {
+              "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+              "repeat": 1,
+              "command_m_s": 0.9,
+              "speed_rmse_m_s": 0.004614550067923069,
+              "position_rmse_m": 0.005398357562781746
+            },
+            {
+              "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+              "repeat": 1,
+              "command_m_s": 1.5,
+              "speed_rmse_m_s": 0.00357247557932377,
+              "position_rmse_m": 0.013194958314750949
+            }
+          ],
+          "speed_rmse_m_s": {
+            "n": 4,
+            "min": 0.00357247557932377,
+            "median": 0.004079027136088558,
+            "mean": 0.004086269979855989,
+            "p95": 0.00460716099259004,
+            "max": 0.004614550067923069
+          },
+          "position_rmse_m": {
+            "n": 4,
+            "min": 0.005352552047162825,
+            "median": 0.009296657938766347,
+            "mean": 0.009291979583975818,
+            "p95": 0.01321798659673923,
+            "max": 0.013222050411207751
+          }
+        },
+        "heldout": {
+          "trials": [
+            {
+              "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+              "repeat": 2,
+              "command_m_s": 0.9,
+              "speed_rmse_m_s": 0.00454943127818645,
+              "position_rmse_m": 0.00534920267250956
+            },
+            {
+              "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+              "repeat": 2,
+              "command_m_s": 1.5,
+              "speed_rmse_m_s": 0.003590210078593411,
+              "position_rmse_m": 0.013203829124355674
+            },
+            {
+              "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+              "repeat": 0,
+              "command_m_s": 0.9,
+              "speed_rmse_m_s": 0.004748062220900352,
+              "position_rmse_m": 0.005398966420646545
+            },
+            {
+              "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+              "repeat": 0,
+              "command_m_s": 1.5,
+              "speed_rmse_m_s": 0.003424186689947297,
+              "position_rmse_m": 0.013255815044482517
+            },
+            {
+              "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+              "repeat": 1,
+              "command_m_s": 0.9,
+              "speed_rmse_m_s": 0.004591115306022303,
+              "position_rmse_m": 0.0053934525001632415
+            },
+            {
+              "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+              "repeat": 1,
+              "command_m_s": 1.5,
+              "speed_rmse_m_s": 0.003610705578167857,
+              "position_rmse_m": 0.013189031016618582
+            },
+            {
+              "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+              "repeat": 2,
+              "command_m_s": 0.9,
+              "speed_rmse_m_s": 0.004226778550775878,
+              "position_rmse_m": 0.005282783794045017
+            },
+            {
+              "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+              "repeat": 2,
+              "command_m_s": 1.5,
+              "speed_rmse_m_s": 0.0038271196331663188,
+              "position_rmse_m": 0.013187754107359761
+            }
+          ],
+          "speed_rmse_m_s": {
+            "n": 8,
+            "min": 0.003424186689947297,
+            "median": 0.004026949091971098,
+            "mean": 0.004070951166969984,
+            "p95": 0.004693130800693035,
+            "max": 0.004748062220900352
+          },
+          "position_rmse_m": {
+            "n": 8,
+            "min": 0.005282783794045017,
+            "median": 0.009293360264003153,
+            "mean": 0.009282604335022612,
+            "p95": 0.013237619972438122,
+            "max": 0.013255815044482517
+          }
+        }
+      },
+      "constant_deceleration": {
+        "rate": 0.44727298224707845,
+        "rate_unit": "m/s^2",
+        "training": {
+          "trials": [
+            {
+              "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+              "repeat": 0,
+              "command_m_s": 0.9,
+              "speed_rmse_m_s": 0.10635404963942667,
+              "position_rmse_m": 0.25906088838358016
+            },
+            {
+              "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+              "repeat": 0,
+              "command_m_s": 1.5,
+              "speed_rmse_m_s": 0.1201765562482414,
+              "position_rmse_m": 0.16720847872350106
+            },
+            {
+              "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+              "repeat": 1,
+              "command_m_s": 0.9,
+              "speed_rmse_m_s": 0.10696440413668734,
+              "position_rmse_m": 0.26194262760373804
+            },
+            {
+              "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+              "repeat": 1,
+              "command_m_s": 1.5,
+              "speed_rmse_m_s": 0.11705347572634706,
+              "position_rmse_m": 0.1519119536455401
+            }
+          ],
+          "speed_rmse_m_s": {
+            "n": 4,
+            "min": 0.10635404963942667,
+            "median": 0.1120089399315172,
+            "mean": 0.11263712143767562,
+            "p95": 0.11970809416995724,
+            "max": 0.1201765562482414
+          },
+          "position_rmse_m": {
+            "n": 4,
+            "min": 0.1519119536455401,
+            "median": 0.2131346835535406,
+            "mean": 0.21003098708908985,
+            "p95": 0.26151036672071437,
+            "max": 0.26194262760373804
+          }
+        },
+        "heldout": {
+          "trials": [
+            {
+              "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+              "repeat": 2,
+              "command_m_s": 0.9,
+              "speed_rmse_m_s": 0.10635412144348276,
+              "position_rmse_m": 0.2590668316337797
+            },
+            {
+              "source": "/home/j/.local/state/cupcup/measurements/20261007-131810-red",
+              "repeat": 2,
+              "command_m_s": 1.5,
+              "speed_rmse_m_s": 0.12015841388461432,
+              "position_rmse_m": 0.16720298113057644
+            },
+            {
+              "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+              "repeat": 0,
+              "command_m_s": 0.9,
+              "speed_rmse_m_s": 0.10635434331468993,
+              "position_rmse_m": 0.2590195790889702
+            },
+            {
+              "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+              "repeat": 0,
+              "command_m_s": 1.5,
+              "speed_rmse_m_s": 0.12038062573199147,
+              "position_rmse_m": 0.16744936485609113
+            },
+            {
+              "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+              "repeat": 1,
+              "command_m_s": 0.9,
+              "speed_rmse_m_s": 0.10696468988400896,
+              "position_rmse_m": 0.26194870665943226
+            },
+            {
+              "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+              "repeat": 1,
+              "command_m_s": 1.5,
+              "speed_rmse_m_s": 0.11702564420901526,
+              "position_rmse_m": 0.15188088610017733
+            },
+            {
+              "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+              "repeat": 2,
+              "command_m_s": 0.9,
+              "speed_rmse_m_s": 0.10637076240253528,
+              "position_rmse_m": 0.25919643381569124
+            },
+            {
+              "source": "/home/j/.local/state/cupcup/measurements/20261007-132523-blue",
+              "repeat": 2,
+              "command_m_s": 1.5,
+              "speed_rmse_m_s": 0.11985172937434548,
+              "position_rmse_m": 0.16681215675010577
+            }
+          ],
+          "speed_rmse_m_s": {
+            "n": 8,
+            "min": 0.10635412144348276,
+            "median": 0.1119951670465121,
+            "mean": 0.11293254128058543,
+            "p95": 0.12030285158540947,
+            "max": 0.12038062573199147
+          },
+          "position_rmse_m": {
+            "n": 8,
+            "min": 0.15188088610017733,
+            "median": 0.21323447197253068,
+            "mean": 0.211572117504353,
+            "p95": 0.2609854111641229,
+            "max": 0.26194870665943226
+          }
+        }
+      }
+    },
+    "preferred_model_on_heldout": "exponential",
+    "selection_is_not_an_independent_final_test": true
+  },
+  "nominal_sandbox_parameters": {
+    "speed": 0.12113566666666667,
+    "turn": 15.769691666666667,
+    "kick-speed": 1.16982,
+    "ball-decay": 0.6960069112439948
+  }
+}

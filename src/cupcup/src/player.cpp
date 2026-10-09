@@ -10,8 +10,15 @@
 #include <sensor_msgs/image_encodings.hpp>
 #include <sensor_msgs/msg/image.hpp>
 
-#include "ball_tracker.hpp"
+#include "ball_tracker.hpp"  // BallObservation type only; no tracker instance.
+#include "ball_perception.hpp"
+#include "ball_appearance.hpp"
+#include "camera_geometry.hpp"
+#include "sensor_time.hpp"
 #include "strategy_logic.hpp"
+#include "world_model.hpp"
+#include "match_policy.hpp"
+#include "robot_perception.hpp"
 
 #include <opencv2/core.hpp>
 #include <opencv2/dnn.hpp>
@@ -21,6 +28,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <cstdlib>
 #include <exception>
 #include <memory>
 #include <sstream>
@@ -64,14 +72,7 @@ double wrapDegrees(double value)
 
 using Ball = cupcup::BallObservation;
 
-struct RobotDetection {
-    bool valid = false;
-    double x = 0.0;
-    double y = 0.0;
-    double width = 0.0;
-    double height = 0.0;
-    double score = 0.0;
-};
+using RobotDetection = cupcup::RobotBox;
 
 enum class ForwardState { Wait, Search, Approach, Orbit, Align, Settle, Kick, Verify, Recover };
 
@@ -124,7 +125,15 @@ public:
         cv::setNumThreads(1);
 
         const auto modelPath = node_->declare_parameter<std::string>("ball_model", "");
+        const auto verifierPath = node_->declare_parameter<std::string>("ball_verifier_model", "");
         minScore_ = clampValue(node_->declare_parameter<double>("ball_min_score", 0.30), 0.20, 0.90);
+        groundBallEnabled_ = node_->declare_parameter<bool>("ball_ground_projection", true);
+        geometryKickEnabled_ = node_->declare_parameter<bool>("kick_geometry_alignment", true);
+        ballPatternFilter_ = node_->declare_parameter<bool>("ball_pattern_filter", true);
+        robotHeightEstimate_ = clampValue(
+            node_->declare_parameter<double>("robot_height_estimate", 0.68), 0.45, 0.90);
+        cameraRootHeight_ = clampValue(
+            node_->declare_parameter<double>("camera_root_height", 0.345), 0.25, 0.50);
         leftKickX_ = clampValue(node_->declare_parameter<double>("left_kick_x", 0.399), 0.30, 0.49);
         rightKickX_ = clampValue(node_->declare_parameter<double>("right_kick_x", 0.575), 0.51, 0.70);
         kickY_ = clampValue(node_->declare_parameter<double>("kick_y", 0.78), 0.50, 0.88);
@@ -133,14 +142,9 @@ public:
             node_->declare_parameter<double>("forward_boundary_margin", 0.75), 0.20, 1.20);
         defenderBoundaryMargin_ = clampValue(
             node_->declare_parameter<double>("defender_boundary_margin", 0.75), 0.20, 1.20);
-        ballTrackGate_ = clampValue(
-            node_->declare_parameter<double>("ball_track_innovation_gate", 0.30), 0.10, 0.60);
-        ballTrackTimeout_ = clampValue(
-            node_->declare_parameter<double>("ball_track_timeout", 0.60), 0.20, 1.20);
         const int configuredConfirmHits = static_cast<int>(
             node_->declare_parameter<int>("ball_confirm_hits", 2));
         ballConfirmHits_ = std::max(2, std::min(6, configuredConfirmHits));
-        ballTracker_ = cupcup::BallTracker(ballTrackGate_, ballTrackTimeout_);
         lifecycle_.setRestartGrace(clampValue(
             node_->declare_parameter<double>("restart_grace", 1.50), 0.50, 4.0));
         defenderHomeX_ = clampValue(
@@ -155,19 +159,13 @@ public:
             node_->declare_parameter<double>("claim_stale_after", 1.20), 0.60, 3.0);
         takeoverAfter_ = clampValue(
             node_->declare_parameter<double>("takeover_after", 2.50), 1.20, 6.0);
+        kickDirectionHysteresis_ = clampValue(
+            node_->declare_parameter<double>("kick_direction_hysteresis", 0.25), 0.0, 2.0);
         defenderClearEnabled_ = node_->declare_parameter<bool>("defender_clear_enabled", true);
-        defenderClearRadius_ = clampValue(
-            node_->declare_parameter<double>("defender_clear_radius", 0.075), 0.055, 0.16);
-        defenderClearBearing_ = clampValue(
-            node_->declare_parameter<double>("defender_clear_bearing", 28.0), 10.0, 45.0);
-        defenderClearHeading_ = clampValue(
-            node_->declare_parameter<double>("defender_clear_heading", 18.0), 8.0, 30.0);
-        defenderClearStableFrames_ = std::max(2, std::min(8,
-            static_cast<int>(node_->declare_parameter<int>("defender_clear_stable_frames", 3))));
-        defenderClearCooldown_ = clampValue(
-            node_->declare_parameter<double>("defender_clear_cooldown", 4.0), 2.0, 12.0);
         actionPulseSeconds_ = clampValue(
             node_->declare_parameter<double>("kick_action_pulse", 1.0), 0.75, 1.30);
+        kickSettleFrames_ = std::max(3, std::min(20, static_cast<int>(
+            node_->declare_parameter<int>("kick_settle_frames", 16))));
         gameTimeout_ = clampValue(
             node_->declare_parameter<double>("game_timeout", 2.50), 1.0, 5.0);
         approachTimeout_ = clampValue(
@@ -187,6 +185,17 @@ public:
             } catch (const cv::Exception &error) {
                 RCLCPP_WARN(node_->get_logger(),
                     "cupcup: cannot load ball model (%s); using traditional vision", error.what());
+            }
+        }
+
+        if (!verifierPath.empty()) {
+            try {
+                ballVerifier_.load(verifierPath);
+                RCLCPP_INFO(node_->get_logger(), "cupcup: loaded optional ball verifier %s",
+                    verifierPath.c_str());
+            } catch (const std::exception &error) {
+                ballVerifier_.disable();
+                RCLCPP_WARN(node_->get_logger(), "cupcup: ball verifier disabled: %s", error.what());
             }
         }
 
@@ -210,6 +219,25 @@ public:
                     frame_ = received.clone();
                 }
                 imageAt_ = nowSeconds();
+                imageSimTimeValid_ = cupcup::imageTimeMilliseconds(
+                    message->header.stamp.sec, message->header.stamp.nanosec,
+                    imageSimTimeMs_);
+                imageHeadYaw_ = head_.yaw;
+                imageHeadPitch_ = head_.pitch;
+                imageImuYaw_ = imu_.yaw;
+                imageImuPitch_ = imu_.pitch;
+                imageImuRoll_ = imu_.roll;
+                imageImuFall_ = imu_.fall;
+                imageHeadAge_ = headAt_ > 0.0 ? imageAt_ - headAt_ : 99.0;
+                imageHeadTargetDwell_ = headStability_.age(imageAt_);
+                imageImuAge_ = imuAt_ > 0.0 ? imageAt_ - imuAt_ : 99.0;
+                imageHeadSimAge_ = imageSimTimeValid_ && head_.time != 0U ?
+                    cupcup::timestampAgeSeconds(imageSimTimeMs_, head_.time) : 99.0;
+                imageImuSimAge_ = imageSimTimeValid_ && imu_.stamp != 0U ?
+                    cupcup::timestampAgeSeconds(imageSimTimeMs_, imu_.stamp) : 99.0;
+                const uint32_t locationStamp = cupcup::optionalStamp(location_);
+                imageLocationSimAge_ = imageSimTimeValid_ && locationStamp != 0U ?
+                    cupcup::timestampAgeSeconds(imageSimTimeMs_, locationStamp) : 99.0;
                 ++imageSequence_;
             });
 
@@ -219,6 +247,8 @@ public:
                 if (!std::isfinite(message->yaw) || !std::isfinite(message->pitch) ||
                     !std::isfinite(message->roll)) return;
                 imu_ = *message;
+                if (std::getenv("CUPCUP_TRACE_PATH") != nullptr)
+                    imuHistory_.push(message->stamp, *message);
                 imuAt_ = nowSeconds();
             });
 
@@ -226,7 +256,10 @@ public:
             robot_ + "/sensor/joint/head", 2,
             [this](common::msg::HeadAngles::ConstSharedPtr message) {
                 if (!std::isfinite(message->yaw) || !std::isfinite(message->pitch)) return;
+                headStability_.observe(message->yaw, message->pitch, nowSeconds());
                 head_ = *message;
+                if (std::getenv("CUPCUP_TRACE_PATH") != nullptr)
+                    headHistory_.push(message->time, *message);
                 headAt_ = nowSeconds();
             });
 
@@ -244,6 +277,7 @@ public:
                 if (!std::isfinite(message->x) || !std::isfinite(message->z)) return;
                 location_ = *message;
                 locationAt_ = nowSeconds();
+                ++locationSequence_;
             });
 
         talkSubscription_ = node_->create_subscription<common::msg::Talk>(
@@ -251,6 +285,7 @@ public:
             [this](common::msg::Talk::ConstSharedPtr message) {
                 teammateTalk_ = message->talk_str;
                 teammateTalkAt_ = nowSeconds();
+                ++teammateTalkSequence_;
             });
 
         enteredAt_ = uprightAt_ = nowSeconds();
@@ -266,6 +301,7 @@ public:
         headTask.pitch = commandedHeadPitch_;
 
         const double time = nowSeconds();
+        navigationTargetValid_ = false;
         const int score = gameData_.red_score + gameData_.blue_score;
         if (lifecycle_.observe(gameState_, score, time) != cupcup::LifecycleEvent::None) {
             reset(time);
@@ -273,6 +309,7 @@ public:
 
         const bool freshFrame = processedImageSequence_ != imageSequence_;
         freshImage_ = freshFrame;
+        bool acceptedBallMeasurement = false;
         if (freshFrame && !frame_.empty()) {
             const Ball detected = detect(frame_);
             // The initial field replay showed occasional one-cell detector
@@ -292,6 +329,52 @@ public:
                     visibleHits_ = consistent ? std::min(visibleHits_ + 1, 20) : 1;
                     ball_ = detected;
                     ballSeenAt_ = time;
+                    acceptedBallMeasurement = true;
+                    localBallPoint_ = cupcup::camera::GroundPoint();
+                    localBallPointAt_ = time;
+                    localBallHeadYaw_ = imageHeadYaw_;
+                    localBallHeadPitch_ = imageHeadPitch_;
+                    if (groundBallEnabled_ && imageImuFall_ == 0 && cupcup::usableBallReceiptGeometry(
+                            imageHeadAge_, imageImuAge_, imageHeadTargetDwell_)) {
+                        const auto pose = cupcup::camera::seurPose(
+                            yawSign_ * imageImuYaw_ + yawOffset_, imageImuPitch_, imageImuRoll_,
+                            imageHeadYaw_, imageHeadPitch_, cameraRootHeight_);
+                        localBallPoint_ = cupcup::camera::project(
+                            pose, ball_.x, ball_.y, frame_.cols, frame_.rows);
+                        if (std::hypot(localBallPoint_.x, localBallPoint_.z) > 8.0)
+                            localBallPoint_.valid = false;
+                    }
+                    // Preserve the capture timestamp of this accepted ball,
+                    // not the timestamp of a later frame without a detection.
+                    ballImageSimTimeMs_ = imageSimTimeValid_ ? imageSimTimeMs_ : 0U;
+                    ballImageHeadPitch_ = imageHeadPitch_;
+                    ballImageImuPitch_ = imageImuPitch_;
+                    ballImageHeadSimAge_ = imageHeadSimAge_;
+                    ballImageImuSimAge_ = imageImuSimAge_;
+                    if (std::getenv("CUPCUP_TRACE_PATH") != nullptr) {
+                        common::msg::HeadAngles captureHead;
+                        common::msg::ImuData captureImu;
+                        ballGroundPoint_ = cupcup::camera::GroundPoint();
+                        ballImageHeadSimAge_ = ballImageImuSimAge_ = 99.0;
+                        const bool headMatched = headHistory_.nearest(ballImageSimTimeMs_,
+                            captureHead, ballImageHeadSimAge_);
+                        const bool imuMatched = imuHistory_.nearest(ballImageSimTimeMs_,
+                            captureImu, ballImageImuSimAge_);
+                        if (headMatched && imuMatched) {
+                            ballImageHeadPitch_ = captureHead.pitch;
+                            ballImageImuPitch_ = captureImu.pitch;
+                            ballCameraPose_ = cupcup::camera::seurPose(captureImu.yaw,
+                                captureImu.pitch, captureImu.roll, captureHead.yaw,
+                                captureHead.pitch, cameraRootHeight_);
+                            // Normal world's ball radius is 0.07 m. The opt-in
+                            // calibration fixture explicitly fixes its center
+                            // at 0.05 m; do not confuse that with normal play.
+                            const double planeHeight =
+                                std::getenv("CUPCUP_PERCEPTION_CALIBRATION") ? 0.05 : 0.07;
+                            ballGroundPoint_ = cupcup::camera::project(ballCameraPose_,
+                                ball_.x, ball_.y, frame_.cols, frame_.rows, planeHeight);
+                        }
+                    }
                     lastBearing_ = head_.yaw + std::atan((0.5 - ball_.x) * 2.0 * std::tan(1.3613 / 2.0)) *
                         180.0 / M_PI;
                 } else if (time - ballSeenAt_ > 1.0) {
@@ -313,6 +396,7 @@ public:
         const bool sensorsFresh = time - imageAt_ < 0.8 && time - imuAt_ < 0.8 &&
             time - headAt_ < 0.8 && time - gameAt_ < gameTimeout_;
         const bool locationFresh = time - locationAt_ < 2.0;
+        updateWorldModel(time, freshFrame && acceptedBallMeasurement);
         const bool fallen = imu_.fall != common::msg::ImuData::FALL_NONE;
         const bool playerActive = isPlayerActive();
         const bool healthReady = lifecycle_.canPlay(gameState_, time) && playerActive &&
@@ -321,6 +405,8 @@ public:
         if (fallen) uprightAt_ = time;
 
         if (!healthReady) {
+            sharedObstacles_.clear();
+            policyMemory_.reset();
             if (time - lastHealthLogAt_ > 5.0) {
                 RCLCPP_WARN(node_->get_logger(),
                     "%s waiting: state=%d image=%.2f imu=%.2f head=%.2f game=%.2f location=%.2f fall=%d",
@@ -334,32 +420,45 @@ public:
             tacticalAction_ = cupcup::TacticalAction::Hold;
             claim_ = false;
             clearMode_ = false;
-        } else if (id_ == 1) {
-            updateTeammateStatus(time);
-            updateTacticalDecision(time, locationFresh);
-            if (tacticalAction_ == cupcup::TacticalAction::Support) {
-                runSupport(body, headTask, time, locationFresh);
-            } else {
-                runForward(body, headTask, time, locationFresh);
-            }
         } else {
-            updateTeammateStatus(time);
+            updateTeammateStatus();
             updateTacticalDecision(time, locationFresh);
-            if (tacticalAction_ == cupcup::TacticalAction::Clear ||
-                tacticalAction_ == cupcup::TacticalAction::Chase) {
+            if (cupcup::isBallAction(tacticalAction_)) {
                 runForward(body, headTask, time, locationFresh);
             } else {
-                runDefender(body, headTask, time, locationFresh);
+                // Yielding invalidates near-foot preparation and kick telemetry.
+                // Never resume an old SETTLE/KICK after a role handoff.
+                transition(ForwardState::Wait, time);
+                policyMemory_.reset();
+                shotLaneSelected_ = false;
+                shotYawOffset_ = 0.0;
+                if (tacticalAction_ == cupcup::TacticalAction::Support)
+                    runSupport(body, headTask, time, locationFresh);
+                else if (tacticalAction_ == cupcup::TacticalAction::Defend)
+                    runDefender(body, headTask, time, locationFresh);
+                else stop(body);
             }
         }
 
         if (time - lastStrategyLogAt_ > 2.0) {
-            RCLCPP_INFO(node_->get_logger(), "%s %s tactical=%s claim=%d ball=%.2f radius=%.3f hits=%d bearing=%.1f loc=(%.2f,%.2f) yaw=%.1f target=%.1f cmd=(%.3f,%.3f,%.1f)",
+            const cupcup::PoseEstimate &mappedSelf = worldModel_.self();
+            RCLCPP_INFO(node_->get_logger(), "%s %s tactical=%s claim=%d ball=%.2f radius=%.3f hits=%d bearing=%.1f loc=(%.2f,%.2f) map=(%.2f,%.2f) head=(%.1f,%.1f) image=(%.3f,%.3f) yaw=%.1f target=%.1f cmd=(%.3f,%.3f,%.1f)",
                 robot_.c_str(), stateName(state_), tacticalActionName(tacticalAction_), claim_,
                 ball_.score, ball_.radius, visibleHits_, lastBearing_,
-                location_.x, location_.z, yawSign_ * imu_.yaw + yawOffset_, targetYaw_,
+                location_.x, location_.z, mappedSelf.x, mappedSelf.z,
+                head_.yaw, head_.pitch, ball_.x, ball_.y,
+                yawSign_ * imu_.yaw + yawOffset_, targetYaw_,
                 body.step, body.lateral, body.turn);
             lastStrategyLogAt_ = time;
+        }
+
+        if (std::getenv("CUPCUP_PERCEPTION_CALIBRATION") != nullptr &&
+            std::getenv("CUPCUP_TRACE_PATH") != nullptr && imageSimTimeValid_) {
+            const int stage = static_cast<int>(imageSimTimeMs_ / 2000U) % 18;
+            const double yaws[3] = {-20.0, 0.0, 20.0};
+            headTask.yaw = yaws[(stage / 2) % 3];
+            headTask.pitch = stage % 2 == 0 ? 20.0 : 40.0;
+            stop(body);
         }
 
         if (!frame_.empty()) publishDebug();
@@ -377,10 +476,17 @@ private:
 
     void reset(double time)
     {
+        localBallPoint_ = cupcup::camera::GroundPoint();
+        headStability_.reset();
         ball_ = Ball();
-        ballTracker_.reset();
+        ballImageSimTimeMs_ = 0U;
+        worldModel_.reset();
+        worldLocationSequence_ = locationSequence_;
+        worldTeammateSequence_ = teammateTalkSequence_;
+        worldRobotSequence_ = robotMeasurementSequence_;
         keeper_ = RobotDetection();
-        keeperCandidate_ = RobotDetection();
+        robotDetections_.clear();
+        robotNumberPatches_.clear();
         keeperHits_ = 0;
         visibleHits_ = 0;
         processedImageSequence_ = imageSequence_;
@@ -388,14 +494,13 @@ private:
         commandedHeadPitch_ = 20.0;
         leftFoot_ = true;
         actionIssued_ = false;
-        defenderClearIssued_ = false;
-        defenderClearStableFramesSeen_ = 0;
-        defenderClearCooldownUntil_ = time;
         shotYawOffset_ = 0.0;
         shotLaneSelected_ = false;
         targetYaw_ = attackYaw_;
         teammateStatus_ = cupcup::TeamStatus();
         tacticalDecision_ = cupcup::TacticalDecision();
+        matchIntent_ = cupcup::MatchIntent();
+        policyMemory_.reset();
         tacticalAction_ = cupcup::TacticalAction::Hold;
         claim_ = false;
         clearMode_ = false;
@@ -415,9 +520,12 @@ private:
         if (next == ForwardState::Align || next == ForwardState::Settle) {
             shotLaneSelected_ = false;
         }
+        if (next == ForwardState::Verify || next == ForwardState::Recover)
+            policyMemory_.reset();
         state_ = next;
         enteredAt_ = time;
         stableFrames_ = 0;
+        missedAlignmentFrames_ = 0;
         RCLCPP_INFO(node_->get_logger(), "%s strategy -> %s", robot_.c_str(), stateName(state_));
         if (next == ForwardState::Kick) {
             actionIssued_ = false;
@@ -463,25 +571,26 @@ private:
         const cupcup::PlayerRole role = id_ == 1 ? cupcup::PlayerRole::Forward :
             cupcup::PlayerRole::Defender;
         const double margin = id_ == 1 ? forwardBoundaryMargin_ : defenderBoundaryMargin_;
+        const cupcup::FieldPoint pose = selfPosition(nowSeconds());
         const cupcup::BoundaryDecision boundary = boundaryGuard_.update(
-            teamColor, role, location_.x, margin);
-        bool unsafeStep = false;
-        if (boundary.forwardBoundary) {
-            // Both teams use a positive local step toward the opponent. At
-            // our own penalty boundary only a negative retreat is unsafe.
-            unsafeStep = body.step < -0.001;
-        } else if (boundary.defenderBoundary) {
-            // A defender must not advance toward the opponent at midfield;
-            // retreating to its home lane remains allowed.
-            unsafeStep = body.step > 0.001;
-        }
+            teamColor, role, pose.x, pose.z, margin);
+        const double guardedMargin = boundary.stopWalking ? margin + 0.18 : margin;
+        const bool unsafeStep = !cupcup::FieldGeometry::safeMotion(teamColor, id_, pose,
+            yawSign_ * imu_.yaw + yawOffset_, body.step, body.lateral, guardedMargin);
         if (unsafeStep && body.type == common::msg::BodyTask::TASK_WALK) {
             // Stop only the forbidden direction. Stopping both directions can
             // deadlock a forward at kickoff when it starts near its boundary.
             body.step = 0.0;
             body.lateral = 0.0;
-            body.count = 0;
+            body.count = std::abs(body.turn) > 0.01 ? 2 : 0;
         }
+    }
+
+    cupcup::FieldPoint selfPosition(double time) const
+    {
+        const cupcup::PoseEstimate &self = worldModel_.self();
+        if (self.fresh(time, 2.0)) return {self.x, self.z};
+        return {location_.x, location_.z};
     }
 
     bool visible(double time) const
@@ -509,15 +618,34 @@ private:
             keeper_.x > 0.34 && keeper_.x < 0.66;
     }
 
+    bool hasSharedKickTarget(double time) const
+    {
+        const auto &ball = worldModel_.ball();
+        const auto &target = matchIntent_.kickTarget;
+        return matchIntent_.kickTargetValid && ball.fresh(time, 0.65) &&
+            std::isfinite(target.x) && std::isfinite(target.z) &&
+            std::hypot(target.x - ball.x, target.z - ball.z) > 1e-6;
+    }
+
     void updateTargetYaw(bool locationFresh)
     {
         if (!locationFresh) return;
-        const double goalX = color_ == Color::Red ? -4.5 : 4.5;
-        if (std::abs(goalX - location_.x) <= 0.7) return;
-        const double geometric = std::atan2(-location_.z, std::abs(goalX - location_.x)) *
-            180.0 / M_PI;
-        const double desired = wrapDegrees(
-            attackYaw_ + (goalX < 0.0 ? geometric : -geometric) + shotYawOffset_);
+        const cupcup::TeamColor teamColor = color_ == Color::Red ?
+            cupcup::TeamColor::Red : cupcup::TeamColor::Blue;
+        const cupcup::PoseEstimate &self = worldModel_.self();
+        const double selfX = self.fresh(nowSeconds(), 2.0) ? self.x : location_.x;
+        const double selfZ = self.fresh(nowSeconds(), 2.0) ? self.z : location_.z;
+        const double goalX = cupcup::FieldGeometry::attackGoalX(teamColor);
+        if (std::abs(goalX - selfX) <= 0.7) return;
+        const auto &ball = worldModel_.ball();
+        const bool planned = hasSharedKickTarget(nowSeconds());
+        const double originX = planned ? ball.x : selfX, originZ = planned ? ball.z : selfZ;
+        const double kickX = planned ? matchIntent_.kickTarget.x : goalX;
+        const double kickZ = planned ? matchIntent_.kickTarget.z : 0.0;
+        // A shared direction is the decision, not the baseline for a second
+        // visual lane decision. Retain legacy bias only without a valid plan.
+        const double desired = wrapDegrees(cupcup::fieldHeading({originX, originZ}, {kickX, kickZ}) +
+                                          (planned ? 0.0 : shotYawOffset_));
         // Supervisor localization is deliberately noisy (up to about one
         // metre in the supplied simulator).  Use it only as a slow bias; a
         // fast response makes the striker turn while it is still acquiring
@@ -534,50 +662,161 @@ private:
             state != common::msg::Player::PALYER_OUT;
     }
 
-    void updateTeammateStatus(double time)
+    void updateTeammateStatus()
     {
         teammateStatus_ = cupcup::parseTeamStatus(teammateTalk_);
-        teammateDecision_ = cupcup::arbitrate(teammateStatus_, time - teammateTalkAt_);
     }
 
-    double ballDistanceEstimate() const
+    void updateWorldModel(double time, bool newBallObservation)
+    {
+        if (worldLocationSequence_ != locationSequence_) {
+            const double yaw = yawSign_ * imu_.yaw + yawOffset_;
+            worldModel_.updateSelf(location_.x, location_.z, yaw, locationAt_);
+            worldLocationSequence_ = locationSequence_;
+        }
+
+        if (worldTeammateSequence_ != teammateTalkSequence_) {
+            teammateStatus_ = cupcup::parseTeamStatus(teammateTalk_);
+            if (teammateStatus_.valid && teammateStatus_.hasPose &&
+                teammateStatus_.poseAge <= 1.2) {
+                worldModel_.updateTeammate(teammateStatus_.poseX, teammateStatus_.poseZ,
+                    teammateStatus_.poseYaw, teammateTalkAt_ - teammateStatus_.poseAge);
+            }
+            if (teammateStatus_.valid && teammateStatus_.ball &&
+                teammateStatus_.hasBallPosition && teammateStatus_.ballMapAge <= 0.45) {
+                worldModel_.updateBall(teammateStatus_.ballX, teammateStatus_.ballZ,
+                    teammateTalkAt_ - teammateStatus_.ballMapAge,
+                    teammateStatus_.ballScore * 0.5, cupcup::BallPositionSource::Teammate);
+            }
+            worldTeammateSequence_ = teammateTalkSequence_;
+        }
+
+        if (newBallObservation && visible(time)) {
+            const cupcup::PoseEstimate &self = worldModel_.self();
+            if (self.fresh(time, 2.0)) {
+                const double estimateTime = nowSeconds();
+                const double distance = ballDistanceEstimate(estimateTime);
+                const cupcup::FieldPoint position = localBallPointFresh(estimateTime) ?
+                    cupcup::FieldPoint{self.x + localBallPoint_.x, self.z + localBallPoint_.z} :
+                    cupcup::projectToField(self.x, self.z, yawSign_ * imu_.yaw + yawOffset_,
+                                          distance, bearingDegrees());
+                worldModel_.updateBall(position.x, position.z, ballSeenAt_, ball_.score,
+                    localBallPointFresh(estimateTime) ? cupcup::BallPositionSource::GroundRay :
+                        cupcup::BallPositionSource::Radius);
+            }
+        }
+
+        if (worldRobotSequence_ != robotMeasurementSequence_) {
+            const cupcup::PoseEstimate &self = worldModel_.self();
+            std::vector<cupcup::RobotObservation> observations;
+            // Complete known-size front markers supplement missed body boxes.
+            // Original neck messages are targets, not measured extrinsics: keep
+            // these diagnostic estimates just as uncertain as other candidates.
+            const bool robotPoseUsable = self.fresh(time, 2.0) && imageImuFall_ == 0 &&
+                cupcup::usableReceiptPose(imageHeadAge_, imageImuAge_);
+            const bool markerGeometryUsable = robotPoseUsable &&
+                cupcup::usableBallReceiptGeometry(imageHeadAge_, imageImuAge_, imageHeadTargetDwell_);
+            if (markerGeometryUsable) {
+                const auto camera = cupcup::camera::seurPose(yawSign_ * imageImuYaw_ + yawOffset_,
+                    imageImuPitch_, imageImuRoll_, imageHeadYaw_, imageHeadPitch_);
+                for (const auto &marker : robotNumberPatches_) {
+                    const auto &t = marker.pose.translation;
+                    const auto offset = cupcup::camera::rotate(camera.rotation, {{t[2], -t[0], -t[1]}});
+                    const cupcup::FieldPoint point{self.x + camera.origin[0] + offset[0],
+                                                  self.z + camera.origin[2] + offset[2]};
+                    const double range = std::hypot(point.x - self.x, point.z - self.z);
+                    observations.push_back({point, marker.panel.team, .25, 1.0 + range * .35,
+                                           cupcup::RobotPositionSource::NumberSquare});
+                }
+            }
+            if (robotPoseUsable && !frame_.empty()) for (const auto &robot : robotDetections_) {
+                if (!robot.valid || robot.height <= 0.04 || robot.height >= 0.95) continue;
+                // One visible body/landmark must not become two same-frame
+                // tracks. A stale-pose marker does not suppress the fallback.
+                const bool hasMarker = markerGeometryUsable && std::any_of(
+                    robotNumberPatches_.begin(), robotNumberPatches_.end(), [&robot](const cupcup::RobotNumberPatch &m) {
+                        return std::abs(m.panel.x - robot.x) <= robot.width / 2 &&
+                            std::abs(m.panel.y - robot.y) <= robot.height / 2;
+                    });
+                if (hasMarker) continue;
+                constexpr double horizontalFov = 1.3613;
+                const double focalPixels = frame_.cols /
+                    (2.0 * std::tan(horizontalFov / 2.0));
+                const double range = clampValue(robotHeightEstimate_ * focalPixels /
+                    (robot.height * frame_.rows), 0.45, 6.0);
+                const double bearing = imageHeadYaw_ +
+                    std::atan((0.5 - robot.x) * 2.0 * std::tan(horizontalFov / 2.0)) *
+                    180.0 / M_PI;
+                const cupcup::FieldPoint position = cupcup::projectToField(
+                    self.x, self.z, yawSign_ * imageImuYaw_ + yawOffset_, range, bearing);
+                observations.push_back({position, robot.team, robot.score * 0.25, 1.0 + range * 0.35,
+                                       cupcup::RobotPositionSource::BoxHeight});
+            }
+            worldModel_.updateRobots(observations, imageAt_);
+            worldRobotSequence_ = robotMeasurementSequence_;
+        }
+
+        worldModel_.expire(time);
+    }
+
+    bool localBallPointFresh(double time) const
+    {
+        return imu_.fall == 0 && localBallPoint_.valid && time >= localBallPointAt_ &&
+            time - localBallPointAt_ <= .25 && headStability_.age(time) >= .8 &&
+            cupcup::sameHeadTarget(localBallHeadYaw_, localBallHeadPitch_, head_.yaw, head_.pitch) &&
+            cupcup::sameHeadTarget(localBallHeadYaw_, localBallHeadPitch_,
+                                   commandedHeadYaw_, commandedHeadPitch_);
+    }
+
+    double ballDistanceEstimate(double time = nowSeconds()) const
     {
         if (!ball_.valid || ball_.radius <= 0.001) return 99.0;
-        // The calibrated camera projection makes the normalized ball radius a
-        // useful short-range distance proxy.  It is only used to choose which
-        // robot claims the ball, never as an absolute navigation measurement.
+        if (localBallPointFresh(time))
+            return clampValue(std::hypot(localBallPoint_.x, localBallPoint_.z), 0.12, 8.0);
+        // Unsettled targets/stale associated sensors/grazing rays fall back to
+        // the existing coarse proxy, not a fabricated precise point. Neither
+        // estimate replaces the near-foot pixel servo.
         return clampValue(0.050 / ball_.radius, 0.12, 8.0);
     }
 
     bool worldBall(double &x, double &z) const
     {
-        if (!visible(nowSeconds()) || age(locationAt_) > 2.0) return false;
-        const double distance = ballDistanceEstimate();
-        const double globalYaw = (yawSign_ * imu_.yaw + yawOffset_ + bearingDegrees()) * M_PI / 180.0;
-        x = location_.x + distance * std::cos(globalYaw);
-        z = location_.z - distance * std::sin(globalYaw);
-        return std::isfinite(x) && std::isfinite(z);
+        const double time = nowSeconds();
+        const cupcup::TimedPoint &ball = worldModel_.ball();
+        if (!visible(time) || !ball.fresh(time, 0.45)) return false;
+        x = ball.x;
+        z = ball.z;
+        return true;
     }
 
     void updateTacticalDecision(double time, bool locationFresh)
     {
-        double ballX = 0.0;
-        double ballZ = 0.0;
-        const bool hasWorldBall = locationFresh && worldBall(ballX, ballZ);
-        cupcup::TacticalInput input;
+        cupcup::MatchState input;
         input.color = color_ == Color::Red ? cupcup::TeamColor::Red : cupcup::TeamColor::Blue;
         input.id = id_;
-        input.selfHealthy = healthy_;
-        input.selfBall = visible(time) && hasWorldBall;
-        input.selfLocationFresh = locationFresh;
-        input.selfBallScore = ball_.score;
-        input.selfBallDistance = ballDistanceEstimate();
-        input.selfBallAge = std::max(0.0, time - ballSeenAt_);
-        input.selfBallX = ballX;
-        input.selfBallZ = ballZ;
+        input.now = time;
+        input.healthy = healthy_ && locationFresh;
+        input.localBallVisible = visible(time);
+        input.map = worldModel_;
+        input.obstacles = cupcup::mapRobotObstacles(input.map, time);
         input.teammate = teammateStatus_;
         input.teammateMessageAge = time - teammateTalkAt_;
-        tacticalDecision_ = cupcup::decideTactics(input, claimStaleAfter_, takeoverAfter_);
+        const auto localObstacles = input.obstacles.size();
+        cupcup::appendTeammateObstacles(input);
+        sharedObstacles_.assign(input.obstacles.begin() + localObstacles, input.obstacles.end());
+        cupcup::PolicyConfig config;
+        config.supportX = supportX_;
+        config.defenderHomeX = defenderHomeX_;
+        config.defenderHomeZ = defenderHomeZ_;
+        config.defenderAnchorGain = defenderAnchorGain_;
+        config.boundaryMargin = id_ == 1 ? forwardBoundaryMargin_ : defenderBoundaryMargin_;
+        config.claimStaleAfter = claimStaleAfter_;
+        config.takeoverAfter = takeoverAfter_;
+        config.defenderClearEnabled = defenderClearEnabled_;
+        config.kickDirectionHysteresis = kickDirectionHysteresis_;
+        matchIntent_ = cupcup::planMatch(input, config,
+            kickDirectionHysteresis_ > 0.0 ? &policyMemory_ : nullptr);
+        tacticalDecision_ = matchIntent_.tactical;
         tacticalAction_ = tacticalDecision_.action;
         claim_ = tacticalDecision_.claim;
         clearMode_ = tacticalAction_ == cupcup::TacticalAction::Clear;
@@ -586,12 +825,18 @@ private:
     void navigateTo(common::msg::BodyTask &body, double targetX, double targetZ,
                     double maxForward = 0.032)
     {
-        const double dx = targetX - location_.x;
-        const double dz = targetZ - location_.z;
+        navigationTargetValid_ = true;
+        navigationTargetX_ = targetX;
+        navigationTargetZ_ = targetZ;
+        const cupcup::PoseEstimate &self = worldModel_.self();
+        const double selfX = self.fresh(nowSeconds(), 2.0) ? self.x : location_.x;
+        const double selfZ = self.fresh(nowSeconds(), 2.0) ? self.z : location_.z;
+        const double dx = targetX - selfX;
+        const double dz = targetZ - selfZ;
         const double distance = std::hypot(dx, dz);
         const double currentYaw = (yawSign_ * imu_.yaw + yawOffset_) * M_PI / 180.0;
         const double localForward = dx * std::cos(currentYaw) - dz * std::sin(currentYaw);
-        const double localLeft = -dx * std::sin(currentYaw) + dz * std::cos(currentYaw);
+        const double localLeft = -dx * std::sin(currentYaw) - dz * std::cos(currentYaw);
         const double desiredYaw = std::atan2(-dz, dx) * 180.0 / M_PI;
         const double error = wrapDegrees(desiredYaw - currentYaw * 180.0 / M_PI);
         const double forward = distance < 0.18 ? 0.0 :
@@ -609,11 +854,10 @@ private:
         // centre line instead of crossing behind the defender and creating a
         // second claimant.  Once the owner loses its claim, normal chasing
         // resumes on the next tick.
-        const double ownAttackSide = color_ == Color::Red ? -1.0 : 1.0;
-        const double targetX = ownAttackSide * supportX_;
-        const double targetZ = teammateStatus_.valid ?
-            clampValue(teammateStatus_.ballZ * 0.35, -1.4, 1.4) : 0.0;
-        if (locationFresh) navigateTo(body, targetX, targetZ, 0.020);
+        if (cupcup::needsBodySearch(tacticalAction_, worldModel_.ball().fresh(time, .65)))
+            walk(body, 0.0, 0.0, 8.0);
+        else if (locationFresh && matchIntent_.targetValid)
+            navigateTo(body, matchIntent_.target.x, matchIntent_.target.z, 0.020);
         else stop(body);
         const bool hasBall = visible(time);
         if (hasBall) {
@@ -634,7 +878,14 @@ private:
         if (!visible(time)) return;
         const double correction = std::atan((0.5 - ball_.x) * 2.0 * std::tan(1.3613 / 2.0)) *
             180.0 / M_PI;
-        if (std::abs(ball_.x - 0.5) > 0.10) {
+        const double recenteredYaw = cupcup::headRecenteringCommand(
+            head_.yaw, ball_.x, ball_.radius, state_ == ForwardState::Orbit);
+        if (recenteredYaw != head_.yaw) {
+            // Once near the ball, gradually align the camera with the calibrated
+            // kick view. The wider deadband is safe here because the body keeps
+            // correcting the residual bearing while ORBIT is active.
+            commandedHeadYaw_ = recenteredYaw;
+        } else if (std::abs(ball_.x - 0.5) > 0.10) {
             commandedHeadYaw_ = clampValue(head_.yaw +
                 clampValue(correction / 3.5, -2.5, 2.5), -60.0, 60.0);
         }
@@ -653,6 +904,11 @@ private:
 
     void selectShotLane(bool locationFresh)
     {
+        if (hasSharedKickTarget(nowSeconds())) {
+            shotYawOffset_ = 0.0;
+            shotLaneSelected_ = true;
+            return;
+        }
         if (shotLaneSelected_) return;
         double worldX = 0.0;
         double worldZ = 0.0;
@@ -712,33 +968,26 @@ private:
                 commandedHeadYaw_ = clampValue(lastBearing_, -60.0, 60.0);
             }
             if (hasBall) transition(ForwardState::Approach, time);
-            // Keep the body planted during the visual scan.  In this Webots
-            // model short isolated turn tasks can destabilize a standing
-            // robot; the head sweep already covers the validated kickoff
-            // view, and body motion starts only after confirmation.
+            else {
+                const auto search = cupcup::searchMotion(
+                    stateAge, time - ballSeenAt_, locationFresh);
+                if (search.forward > 0.0) walk(body, search.forward, 0.0, search.turn);
+            }
         } else if (state_ == ForwardState::Approach) {
             if (!hasBall) {
                 if (time - ballSeenAt_ > 1.0) transition(ForwardState::Search, time);
             } else {
-                if (std::abs(lastBearing_) > 45.0) {
-                    // An edge candidate is not reliable enough to justify a
-                    // body turn. Re-enter the head scan and reacquire it in a
-                    // centered pose; this is safer than turning on a false
-                    // YOEO cell and losing balance.
-                    transition(ForwardState::Search, time);
-                } else {
-                const double speed = ball_.radius < 0.025 ? 0.05 :
-                    (ball_.radius < 0.045 ? 0.04 : 0.032);
                 // A pure turn task is not reliable in this Webots gait: in
                 // some initial poses the commanded yaw is accepted but the
                 // robot does not change heading.  Use a small crawl while
                 // turning so the approach cannot deadlock at a persistent
                 // 20--40 degree bearing.  Once centered, use the calibrated
                 // forward speed.
-                const double forward = std::abs(lastBearing_) > 24.0 ? 0.008 : speed;
+                const auto approach = cupcup::approachMotion(lastBearing_, ball_.radius);
+                const double forward = approach.forward;
                 // Recover the four-player kickoff view quickly when the ball
                 // starts near the edge or behind the camera.
-                double turn = clampValue(lastBearing_ * 0.18, -4.0, 4.0);
+                double turn = approach.turn;
                 double lateral = 0.0;
                 if (obstacleAhead()) {
                     // The detector's x coordinate is image-left to image-right;
@@ -755,7 +1004,6 @@ private:
                 if (ball_.radius > 0.045 && ball_.radius < 0.11 &&
                     std::abs(lastBearing_) < 30.0)
                     transition(ForwardState::Orbit, time);
-                }
             }
         } else if (state_ == ForwardState::Orbit) {
             if (!hasBall) {
@@ -779,9 +1027,8 @@ private:
                     walk(body, obstacleAhead() ? closingForward * 0.45 : closingForward,
                         clampValue(lateral, -0.028, 0.028), clampValue(turn, -8.0, 8.0));
                 }
-                if (std::abs(headingError()) < 15.0 && std::abs(lastBearing_) < 22.0 &&
-                    std::abs(head_.yaw) < 8.0 && head_.pitch > kickPitch_ - 8.0 &&
-                    ball_.y > 0.30 && ball_.radius > 0.050 && ball_.radius < 0.12) {
+                if (cupcup::readyForAlignment(headingError(), lastBearing_, head_.yaw,
+                    head_.pitch, kickPitch_, ball_.radius, ball_.y)) {
                     leftFoot_ = lastBearing_ >= 0.0;
                     transition(ForwardState::Align, time);
                 }
@@ -792,24 +1039,35 @@ private:
             const double desiredX = leftFoot_ ? leftKickX_ : rightKickX_;
             const bool fixedView = std::abs(head_.yaw) < 6.0 &&
                 std::abs(head_.pitch - kickPitch_) < 5.0;
+            cupcup::KickPoseControl metric;
+            if (geometryKickEnabled_ && hasBall && localBallPointFresh(nowSeconds()))
+                metric = cupcup::metricKickPose(localBallPoint_.x, localBallPoint_.z,
+                    yawSign_ * imu_.yaw + yawOffset_, leftFoot_);
             const bool linedUp = hasBall && fixedView && std::abs(headingError()) < 13.0 &&
-                std::abs(ball_.x - desiredX) < 0.060 && std::abs(ball_.y - kickY_) < 0.070 &&
+                (geometryKickEnabled_ ? metric.valid && metric.linedUp :
+                    std::abs(ball_.x - desiredX) < 0.060 && std::abs(ball_.y - kickY_) < 0.070) &&
                 ball_.radius > 0.048;
             const bool holdPose = hasBall && fixedView && std::abs(headingError()) < 19.0 &&
-                std::abs(ball_.x - desiredX) < 0.095 && std::abs(ball_.y - kickY_) < 0.105 &&
+                (geometryKickEnabled_ ? metric.valid && metric.holdPose :
+                    std::abs(ball_.x - desiredX) < 0.095 && std::abs(ball_.y - kickY_) < 0.105) &&
                 ball_.radius > 0.042;
-            if (freshImage_) stableFrames_ = linedUp ? std::min(stableFrames_ + 1, 20) :
-                (holdPose ? stableFrames_ : 0);
+            const bool keepSettling = cupcup::updateKickAlignment(
+                freshImage_, linedUp, holdPose, stableFrames_, missedAlignmentFrames_);
             if (state_ == ForwardState::Settle) {
-                if (!holdPose) transition(ForwardState::Align, time);
-                else if (stateAge > 0.8 && stableFrames_ >= 3) transition(ForwardState::Kick, time);
+                if (!keepSettling) transition(ForwardState::Align, time);
+                else if (linedUp &&
+                         cupcup::settledForKick(stateAge, stableFrames_, kickSettleFrames_))
+                    transition(ForwardState::Kick, time);
             } else if (!hasBall) {
                 if (time - ballSeenAt_ > 0.8) transition(ForwardState::Recover, time);
             } else if (fixedView) {
                 if (std::abs(headingError()) > 27.0) transition(ForwardState::Orbit, time);
-                else if (stableFrames_ >= 3) transition(ForwardState::Settle, time);
-                else walk(body, clampValue((kickY_ - ball_.y) * 0.16, -0.018, 0.025),
-                          clampValue((desiredX - ball_.x) * 0.20, -0.028, 0.028),
+                else if (linedUp && stableFrames_ >= 3) transition(ForwardState::Settle, time);
+                else if (!geometryKickEnabled_ || metric.valid)
+                    walk(body, geometryKickEnabled_ ? metric.forward :
+                              clampValue((kickY_ - ball_.y) * 0.16, -0.018, 0.025),
+                          geometryKickEnabled_ ? metric.lateral :
+                              clampValue((desiredX - ball_.x) * 0.20, -0.028, 0.028),
                           headingError() * 0.24);
             }
         } else if (state_ == ForwardState::Kick) {
@@ -843,7 +1101,8 @@ private:
             }
         }
 
-        if ((state_ == ForwardState::Approach && time - enteredAt_ > approachTimeout_) ||
+        if (((state_ == ForwardState::Approach || state_ == ForwardState::Align) &&
+             time - enteredAt_ > approachTimeout_) ||
             (state_ == ForwardState::Orbit && time - enteredAt_ > orbitTimeout_)) {
             ++recoveryCount_;
             transition(ForwardState::Recover, time);
@@ -861,76 +1120,26 @@ private:
         const double ageInState = time - defenderEnteredAt_;
         const bool hasBall = visible(time);
         updateTargetYaw(locationFresh);
-        updateTeammateStatus(time);
         double ballBearing = 0.0;
 
         if (hasBall) {
             ballBearing = bearingDegrees();
             commandedHeadYaw_ = clampValue(head_.yaw + ballBearing / 3.0, -55.0, 55.0);
+            commandedHeadPitch_ = cupcup::defenderTrackingPitch(head_.pitch, ball_.y);
         } else {
             const int index = static_cast<int>(ageInState) % 6;
             commandedHeadYaw_ = scanYaw[index];
             commandedHeadPitch_ = scanPitch[index];
         }
 
-        if (!defenderClearEnabled_ || time < defenderClearCooldownUntil_) {
-            defenderClearStableFramesSeen_ = 0;
-        } else {
-            cupcup::DefenderClearInput clearInput;
-            clearInput.color = color_ == Color::Red ? cupcup::TeamColor::Red : cupcup::TeamColor::Blue;
-            clearInput.ballVisible = hasBall;
-            clearInput.locationFresh = locationFresh;
-            clearInput.forwardBusy = teammateDecision_.forwardBusy;
-            clearInput.locationX = location_.x;
-            clearInput.ballRadius = ball_.radius;
-            clearInput.bearing = ballBearing;
-            clearInput.headingError = headingError();
-            const bool clearCandidate = cupcup::shouldDefenderClear(clearInput,
-                defenderClearRadius_, defenderClearBearing_, defenderClearHeading_,
-                defenderBoundaryMargin_);
-            if (clearCandidate) {
-                defenderClearStableFramesSeen_ = std::min(
-                    defenderClearStableFramesSeen_ + 1, defenderClearStableFrames_);
-            } else if (!defenderClearIssued_) {
-                defenderClearStableFramesSeen_ = 0;
-            }
-        }
-
-        // Track a conservative defensive anchor.  It follows the ball only
-        // laterally, keeping the robot between its goal and the play while
-        // respecting the own-half boundary.
-        const double ownHomeX = color_ == Color::Red ? defenderHomeX_ : -defenderHomeX_;
-        const double observedZ = hasBall ? [&]() {
-            double ignoredX = 0.0;
-            double worldZ = defenderHomeZ_;
-            if (worldBall(ignoredX, worldZ)) return worldZ;
-            return defenderHomeZ_;
-        }() : (teammateStatus_.valid ? teammateStatus_.ballZ : defenderHomeZ_);
-        const double targetZ = clampValue(
-            defenderHomeZ_ + defenderAnchorGain_ * (observedZ - defenderHomeZ_), -1.45, 1.45);
-        if (locationFresh) navigateTo(body, ownHomeX, targetZ, 0.018);
+        // Follow the shared goal-side coverage target; the role boundary and
+        // image safety layer remain independent of tactical placement.
+        if (cupcup::needsBodySearch(tacticalAction_, worldModel_.ball().fresh(time, .65)))
+            walk(body, 0.0, 0.0, 8.0);
+        else if (locationFresh && matchIntent_.targetValid)
+            navigateTo(body, matchIntent_.target.x, matchIntent_.target.z, 0.018);
         else stop(body);
 
-        // A defender may issue one single-shot clearance only after a close
-        // ball has stayed aligned for several frames, the striker is not
-        // claiming it, and the robot remains safely in its own half.
-        if (defenderClearEnabled_ && !defenderClearIssued_ &&
-            defenderClearStableFramesSeen_ >= defenderClearStableFrames_ &&
-            time >= defenderClearCooldownUntil_) {
-            leftFoot_ = ballBearing >= 0.0;
-            body.type = common::msg::BodyTask::TASK_ACT;
-            body.count = 1;
-            body.actname = leftFoot_ ? "left_kick" : "right_kick";
-            defenderClearIssued_ = true;
-            defenderClearIssuedAt_ = time;
-            defenderClearCooldownUntil_ = time + defenderClearCooldown_;
-            defenderClearStableFramesSeen_ = 0;
-            RCLCPP_INFO(node_->get_logger(), "%s defender clear foot=%s bearing=%.1f",
-                robot_.c_str(), leftFoot_ ? "left" : "right", ballBearing);
-        }
-        if (defenderClearIssued_ && time - defenderClearIssuedAt_ > 0.45) {
-            defenderClearIssued_ = false;
-        }
         enforceSafety(body);
         headTask.yaw = commandedHeadYaw_;
         headTask.pitch = commandedHeadPitch_;
@@ -939,13 +1148,15 @@ private:
     Ball detect(const cv::Mat &rgb)
     {
         if (rgb.empty()) return Ball();
-        if (!ballNet_.empty()) return detectModel(rgb);
-        return detectTraditional(rgb);
+        if (ballNet_.empty()) robotDetections_.clear();
+        const auto ball = !ballNet_.empty() ? detectModel(rgb) : detectTraditional(rgb);
+        robotNumberPatches_ = cupcup::detectRobotNumberPatches(rgb);
+        ++robotMeasurementSequence_;
+        return ball;
     }
 
     Ball detectModel(const cv::Mat &rgb)
     {
-        Ball best;
         const int side = std::max(rgb.cols, rgb.rows);
         const int left = (side - rgb.cols) / 2;
         const int top = (side - rgb.rows) / 2;
@@ -956,77 +1167,30 @@ private:
         ballNet_.setInput(cv::dnn::blobFromImage(resized, 1.0 / 255.0));
         std::vector<cv::Mat> outputs;
         ballNet_.forward(outputs, ballNet_.getUnconnectedOutLayersNames());
-        auto sigmoid = [](double value) { return 1.0 / (1.0 + std::exp(-value)); };
-        double bestRank = 0.0;
-        double bestRobotRank = 0.0;
         const double currentTime = nowSeconds();
-        for (const auto &output : outputs) {
-            if (output.dims != 4 || output.size[1] != 7) continue;
-            const int height = output.size[2];
-            const int width = output.size[3];
-            const float *data = output.ptr<float>();
-            for (int y = 0; y < height; ++y) {
-                for (int x = 0; x < width; ++x) {
-                    auto value = [&](int channel) {
-                        return data[channel * height * width + y * width + x];
-                    };
-                    const double objectness = sigmoid(value(4));
-                    const double confidence = objectness * sigmoid(value(5));
-                    const double robotConfidence = objectness * sigmoid(value(6));
-                    if (std::max(confidence, robotConfidence) < 0.30) continue;
-                    const double cx = (sigmoid(value(0)) + x) * side / width - left;
-                    const double cy = (sigmoid(value(1)) + y) * side / height - top;
-                    const double w = std::exp(value(2)) * 99.99983 * side / 416.0;
-                    const double h = std::exp(value(3)) * 99.99983 * side / 416.0;
-                    if (!std::isfinite(w + h) || cx < 0 || cy < 0 || cx >= rgb.cols || cy >= rgb.rows) continue;
-                    const double nx = cx / rgb.cols;
-                    const double ny = cy / rgb.rows;
-                    const double nw = w / rgb.cols;
-                    const double nh = h / rgb.rows;
-                    const double ballRadius = (w + h) / (4.0 * rgb.cols);
-                    if (robotConfidence > 0.45 && value(6) > value(5) && ny < 0.65 &&
-                        nw > 0.025 && nh > 0.06 && robotConfidence > bestRobotRank) {
-                        bestRobotRank = robotConfidence;
-                        keeperCandidate_ = {true, nx, ny, nw, nh, robotConfidence};
-                    }
-                    if (confidence < minScore_ || value(5) < value(6)) continue;
-                    // Very large decoded boxes are usually a robot/body or a
-                    // field edge, not the ball. Rejecting them keeps a close
-                    // false positive from driving the striker into a turn.
-                    if (ballRadius > 0.11) continue;
-                    double rank = confidence;
-                    // The initial validated implementation used temporal
-                    // candidate ranking before the tracker. This prevents a
-                    // high-scoring edge/robot candidate from teleporting the
-                    // ball estimate when several YOEO cells fire.
-                    if (state_ != ForwardState::Search &&
-                        ball_.valid && currentTime - ballSeenAt_ < 0.5) {
-                        const double dx = nx - ball_.x;
-                        const double dy = ny - ball_.y;
-                        rank *= 0.65 + 0.35 * std::exp(-20.0 * (dx * dx + dy * dy));
-                    }
-                    if (rank > bestRank) {
-                        bestRank = rank;
-                        best.valid = true;
-                        best.x = nx;
-                        best.y = ny;
-                        best.radius = ballRadius;
-                        best.score = confidence;
-                    }
-                }
-            }
+        const Ball prior = state_ != ForwardState::Search &&
+            ball_.valid && currentTime - ballSeenAt_ < 0.5 ? ball_ : Ball();
+        Ball best;
+        try {
+            best = cupcup::decodeBall(outputs, rgb, minScore_, ballPatternFilter_, prior, &ballVerifier_);
+        } catch (const std::exception &error) {
+            ballVerifier_.disable();
+            RCLCPP_WARN(node_->get_logger(), "cupcup: ball verifier failed; baseline restored: %s",
+                error.what());
+            best = cupcup::decodeBall(outputs, rgb, minScore_, ballPatternFilter_, prior);
         }
-        if (keeperCandidate_.valid) {
+        robotDetections_ = cupcup::decodeRobotBoxes(outputs, rgb);
+        if (!robotDetections_.empty()) {
+            const auto &candidate = robotDetections_.front();
             const bool consistent = keeper_.valid &&
-                std::abs(keeperCandidate_.x - keeper_.x) < 0.15;
-            keeper_ = keeperCandidate_;
+                std::abs(candidate.x - keeper_.x) < 0.15;
+            keeper_ = candidate;
             keeperAt_ = currentTime;
             keeperHits_ = consistent ? std::min(keeperHits_ + 1, 20) : 1;
         } else if (currentTime - keeperAt_ > 0.5) {
             keeper_ = RobotDetection();
             keeperHits_ = 0;
         }
-        keeperCandidate_ = RobotDetection();
         return best;
     }
 
@@ -1075,24 +1239,135 @@ private:
 
     void publishTalk(double time)
     {
+        const double estimateTime = nowSeconds();
+        const bool ballVisible = visible(time);
+        const char *rangeSource = !ballVisible ? "unknown" :
+            localBallPointFresh(estimateTime) ? "ground_ray" : "radius";
         std::ostringstream message;
         double worldX = 0.0;
         double worldZ = 0.0;
         const bool hasWorldBall = worldBall(worldX, worldZ);
-        const bool active = claim_ || defenderClearIssued_ ||
-            tacticalAction_ == cupcup::TacticalAction::Chase ||
-            tacticalAction_ == cupcup::TacticalAction::Clear;
+        const bool active = claim_ || cupcup::isBallAction(tacticalAction_);
         message << "cupcup|id=" << id_ << "|role=" << (id_ == 1 ? "forward" : "defender")
                 << "|state=" << (id_ == 1 ? stateName(state_) :
                     (tacticalAction_ == cupcup::TacticalAction::Clear ? stateName(state_) : "DEFEND"))
+                << "|tac=" << tacticalActionName(tacticalAction_)
+                << "|why=" << matchIntent_.reason
                 << "|ball=" << (visible(time) ? 1 : 0) << "|active=" << (active ? 1 : 0)
-                << "|kick=" << ((state_ == ForwardState::Kick || defenderClearIssued_) ? 1 : 0)
+                << "|kick=" << ((cupcup::isBallAction(tacticalAction_) &&
+                    state_ == ForwardState::Kick) ? 1 : 0)
                 << "|claim=" << (claim_ ? 1 : 0)
                 << "|healthy=" << (healthy_ ? 1 : 0)
+                << "|mapped_ball_fresh=" << (worldModel_.ball().fresh(time, .65) ? 1 : 0)
+                << "|mapped_ball_age=" << (worldModel_.ball().valid ?
+                    time - worldModel_.ball().observedAt : 99.0)
+                << "|peer_message_age=" << clampValue(time - teammateTalkAt_, 0.0, 99.0)
+                << "|peer_obstacles=" << sharedObstacles_.size()
                 << "|conf=" << (visible(time) ? ball_.score : 0.0)
-                << "|bdist=" << (visible(time) ? ballDistanceEstimate() : 99.0)
+                << "|bdist=" << (ballVisible ? ballDistanceEstimate(estimateTime) : 99.0)
                 << "|age=" << clampValue(time - ballSeenAt_, 0.0, 9.9);
-        if (hasWorldBall) message << "|bx=" << worldX << "|bz=" << worldZ;
+        if (worldModel_.ball().fresh(time, .65)) {
+            const auto &mapped = worldModel_.ball();
+            // Diagnostic map, NOT direct observations to relay as bx/bz.
+            message << "|mbx=" << mapped.x << "|mbz=" << mapped.z
+                    << "|mbage=" << time - mapped.observedAt
+                    << "|mbsource=" << cupcup::ballPositionSourceName(worldModel_.latestBallSource());
+        }
+        if (hasWorldBall) {
+            const double mapAge = std::max(0.0,
+                time - worldModel_.ball().observedAt);
+            message << "|bx=" << worldX << "|bz=" << worldZ
+                    << "|bmap_age=" << clampValue(mapAge, 0.0, 9.9);
+        }
+        if (navigationTargetValid_) {
+            message << "|tx=" << navigationTargetX_ << "|tz=" << navigationTargetZ_;
+        } else if (hasWorldBall &&
+                   (tacticalAction_ == cupcup::TacticalAction::Chase ||
+                    tacticalAction_ == cupcup::TacticalAction::Clear)) {
+            message << "|tx=" << worldX << "|tz=" << worldZ;
+        }
+        message << "|ball_range_source=" << rangeSource;
+        if (matchIntent_.kickTargetValid)
+            message << "|kx=" << matchIntent_.kickTarget.x << "|kz=" << matchIntent_.kickTarget.z;
+        if (cupcup::isBallAction(tacticalAction_) && state_ >= ForwardState::Approach &&
+            state_ <= ForwardState::Kick)
+            message << "|aim_yaw=" << targetYaw_ << "|aim_offset=" << shotYawOffset_;
+        if (std::getenv("CUPCUP_TRACE_PATH") != nullptr && !frame_.empty()) {
+            message << "|camera_root_height=" << cameraRootHeight_;
+            if (ballVisible && localBallPointFresh(estimateTime)) {
+                message << "|lgdx=" << localBallPoint_.x << "|lgdz=" << localBallPoint_.z
+                        << "|lg_age=" << estimateTime - localBallPointAt_;
+            }
+            if (ball_.valid) {
+                message << "|iu=" << ball_.x << "|iv=" << ball_.y
+                        << "|ir=" << ball_.radius
+                        << "|bstamp_ms=" << ballImageSimTimeMs_
+                        << "|bihp=" << ballImageHeadPitch_
+                        << "|biip=" << ballImageImuPitch_
+                        << "|biha_sim=" << ballImageHeadSimAge_
+                        << "|biia_sim=" << ballImageImuSimAge_
+                        << "|bgvalid=" << (ballGroundPoint_.valid ? 1 : 0)
+                        << "|bgx=" << ballGroundPoint_.x << "|bgz=" << ballGroundPoint_.z
+                        << "|bcx=" << ballCameraPose_.origin[0]
+                        << "|bcy=" << ballCameraPose_.origin[1]
+                        << "|bcz=" << ballCameraPose_.origin[2];
+                for (int i = 0; i < 9; ++i) message << "|bcr" << i << '=' << ballCameraPose_.rotation[i];
+            }
+            message << "|hy=" << head_.yaw << "|hp=" << head_.pitch
+                    << "|prep_frames=" << stableFrames_ << "|prep_required=" << kickSettleFrames_
+                    << "|phase_age=" << std::max(0.0, time - enteredAt_)
+                    << "|iy=" << imu_.yaw << "|ip=" << imu_.pitch << "|irll=" << imu_.roll
+                    << "|ihy=" << imageHeadYaw_ << "|ihp=" << imageHeadPitch_
+                    << "|iiy=" << imageImuYaw_ << "|iip=" << imageImuPitch_
+                    << "|iirll=" << imageImuRoll_ << "|iha=" << imageHeadAge_
+                    << "|iia=" << imageImuAge_
+                    << "|iha_sim=" << imageHeadSimAge_
+                    << "|iia_sim=" << imageImuSimAge_
+                    << "|ila_sim=" << imageLocationSimAge_
+                    << "|sim_stamp_valid=" << (imageSimTimeValid_ ? 1 : 0)
+                    << "|istamp_ms=" << imageSimTimeMs_
+                    << "|htstamp_ms=" << head_.time
+                    << "|mtstamp_ms=" << imu_.stamp
+                    << "|ltstamp_ms=" << cupcup::optionalStamp(location_)
+                    << "|iw=" << frame_.cols << "|ih=" << frame_.rows
+                    << "|fa=" << age(imageAt_) << "|ha=" << age(headAt_) << "|ma=" << age(imuAt_);
+        }
+        const cupcup::PoseEstimate &self = worldModel_.self();
+        if (self.fresh(time, 2.0)) {
+            message << "|px=" << self.x << "|pz=" << self.z << "|pyaw=" << self.yaw
+                    << "|pose_age=" << clampValue(time - self.observedAt, 0.0, 9.9);
+        }
+        const cupcup::TimedPoint &robotCandidate =
+            worldModel_.robotCandidate().position;
+        if (robotCandidate.fresh(time, 0.65)) {
+            message << "|rx=" << robotCandidate.x << "|rz=" << robotCandidate.z
+                    << "|rc=" << robotCandidate.confidence
+                    << "|ra=" << clampValue(time - robotCandidate.observedAt, 0.0, 9.9);
+        }
+        std::size_t index = 0;
+        for (const auto &robot : worldModel_.robots()) {
+            if (!robot.position.fresh(time, 0.65)) continue;
+            const std::string prefix = "|r" + std::to_string(index++);
+            message << prefix << "id=" << robot.trackId
+                    << prefix << "team=" << cupcup::robotTeamName(robot.team)
+                    << prefix << "x=" << robot.position.x << prefix << "z=" << robot.position.z
+                    << prefix << "conf=" << robot.position.confidence
+                    << prefix << "unc=" << robot.uncertainty
+                    << prefix << "source=" << cupcup::robotPositionSourceName(robot.latestSource)
+                    << prefix << "age=" << time - robot.position.observedAt;
+        }
+        message << "|robots=" << index;
+        // Diagnostic copy of effective policy input, not relayable rN tracks.
+        for (std::size_t i = 0; i < sharedObstacles_.size(); ++i) {
+            const auto &obstacle = sharedObstacles_[i];
+            const std::string prefix = "|pobs" + std::to_string(i);
+            message << prefix << "x=" << obstacle.position.x
+                    << prefix << "z=" << obstacle.position.z
+                    << prefix << "conf=" << obstacle.position.confidence
+                    << prefix << "unc=" << obstacle.uncertainty
+                    << prefix << "age=" << time - obstacle.position.observedAt
+                    << prefix << "team=" << cupcup::robotTeamName(obstacle.team);
+        }
         common::msg::Talk talk;
         talk.talk_str = message.str();
         talkPublisher_->publish(talk);
@@ -1139,7 +1414,8 @@ private:
     rclcpp::Subscription<common::msg::Talk>::SharedPtr talkSubscription_;
 
     cv::dnn::Net ballNet_;
-    cupcup::BallTracker ballTracker_;
+    cupcup::BallCandidateVerifier ballVerifier_;
+    cupcup::WorldModel worldModel_;
     cv::Mat frame_;
     common::msg::ImuData imu_;
     common::msg::HeadAngles head_;
@@ -1147,16 +1423,46 @@ private:
     common::msg::Location location_;
     std::string teammateTalk_;
     cupcup::TeamStatus teammateStatus_;
-    cupcup::TeammateDecision teammateDecision_;
     cupcup::MatchLifecycle lifecycle_;
     cupcup::BoundaryGuard boundaryGuard_;
     int gameState_ = -1;
     double imageAt_ = -100.0;
+    double imageHeadYaw_ = 0.0;
+    double imageHeadPitch_ = 0.0;
+    double imageImuYaw_ = 0.0;
+    double imageImuPitch_ = 0.0;
+    double imageImuRoll_ = 0.0;
+    double imageHeadAge_ = 99.0;
+    int imageImuFall_ = 0;
+    double imageHeadTargetDwell_ = 0.0;
+    cupcup::HeadTargetStability headStability_;
+    cupcup::camera::GroundPoint localBallPoint_;
+    double localBallPointAt_ = -100.0;
+    double localBallHeadYaw_ = 0.0;
+    double localBallHeadPitch_ = 0.0;
+    bool groundBallEnabled_ = true;
+    bool geometryKickEnabled_ = true;
+    double imageImuAge_ = 99.0;
+    double imageHeadSimAge_ = 99.0;
+    double imageImuSimAge_ = 99.0;
+    double imageLocationSimAge_ = 99.0;
+    uint32_t imageSimTimeMs_ = 0;
+    uint32_t ballImageSimTimeMs_ = 0;
+    double ballImageHeadPitch_ = 0.0;
+    double ballImageImuPitch_ = 0.0;
+    double ballImageHeadSimAge_ = 99.0;
+    double ballImageImuSimAge_ = 99.0;
+    cupcup::camera::Pose ballCameraPose_;
+    cupcup::camera::GroundPoint ballGroundPoint_;
+    cupcup::SensorHistory<common::msg::HeadAngles> headHistory_;
+    cupcup::SensorHistory<common::msg::ImuData> imuHistory_;
+    bool imageSimTimeValid_ = false;
     double imuAt_ = -100.0;
     double headAt_ = -100.0;
     double gameAt_ = -100.0;
     double locationAt_ = -100.0;
     double teammateTalkAt_ = -100.0;
+    std::vector<cupcup::ObservedObstacle> sharedObstacles_;
     double ballSeenAt_ = -100.0;
     double keeperAt_ = -100.0;
     double lastHealthLogAt_ = -100.0;
@@ -1168,31 +1474,25 @@ private:
     double yawSign_ = 1.0;
     double yawOffset_ = 0.0;
     double minScore_ = 0.58;
+    bool ballPatternFilter_ = true;
+    double robotHeightEstimate_ = 0.68;
+    double cameraRootHeight_ = 0.345;
     double leftKickX_ = 0.399;
     double rightKickX_ = 0.575;
     double kickY_ = 0.78;
     double kickPitch_ = 60.0;
     double forwardBoundaryMargin_ = 0.75;
     double defenderBoundaryMargin_ = 0.75;
-    double ballTrackGate_ = 0.30;
-    double ballTrackTimeout_ = 0.60;
     double defenderHomeX_ = 1.55;
     double defenderHomeZ_ = 0.0;
     double defenderAnchorGain_ = 0.45;
     double supportX_ = 0.40;
     double claimStaleAfter_ = 1.20;
     double takeoverAfter_ = 2.50;
+    double kickDirectionHysteresis_ = 0.25;
     bool defenderClearEnabled_ = true;
-    double defenderClearRadius_ = 0.075;
-    double defenderClearBearing_ = 28.0;
-    double defenderClearHeading_ = 18.0;
-    double defenderClearCooldown_ = 4.0;
     double actionPulseSeconds_ = 1.0;
-    int defenderClearStableFrames_ = 3;
-    int defenderClearStableFramesSeen_ = 0;
-    bool defenderClearIssued_ = false;
-    double defenderClearIssuedAt_ = -100.0;
-    double defenderClearCooldownUntil_ = 0.0;
+    int kickSettleFrames_ = 16;
     double gameTimeout_ = 2.50;
     double approachTimeout_ = 60.0;
     double orbitTimeout_ = 25.0;
@@ -1204,8 +1504,15 @@ private:
     double targetYaw_ = 0.0;
     std::size_t imageSequence_ = 0;
     std::size_t processedImageSequence_ = 0;
+    std::size_t locationSequence_ = 0;
+    std::size_t worldLocationSequence_ = 0;
+    std::size_t teammateTalkSequence_ = 0;
+    std::size_t worldTeammateSequence_ = 0;
+    std::size_t robotMeasurementSequence_ = 0;
+    std::size_t worldRobotSequence_ = 0;
     int visibleHits_ = 0;
     int stableFrames_ = 0;
+    int missedAlignmentFrames_ = 0;
     int recoveryCount_ = 0;
     bool freshImage_ = false;
     bool searchLowFirst_ = false;
@@ -1214,10 +1521,16 @@ private:
     bool leftFoot_ = true;
     Ball ball_;
     RobotDetection keeper_;
-    RobotDetection keeperCandidate_;
+    std::vector<RobotDetection> robotDetections_;
+    std::vector<cupcup::RobotNumberPatch> robotNumberPatches_;
     int keeperHits_ = 0;
     cupcup::TacticalDecision tacticalDecision_;
+    cupcup::MatchIntent matchIntent_;
+    cupcup::PolicyMemory policyMemory_;
     cupcup::TacticalAction tacticalAction_ = cupcup::TacticalAction::Hold;
+    bool navigationTargetValid_ = false;
+    double navigationTargetX_ = 0.0;
+    double navigationTargetZ_ = 0.0;
     bool claim_ = false;
     bool clearMode_ = false;
     bool healthy_ = false;
@@ -1290,9 +1603,14 @@ int main(int argc, char **argv)
     auto debugPublisher = node->create_publisher<sensor_msgs::msg::Image>(robotName + "/result/image", 5);
     CupcupStrategy strategy(node, robotName, color, id, bodyPublisher, headPublisher, talkPublisher, debugPublisher);
 
+    rclcpp::executors::SingleThreadedExecutor executor;
+    executor.add_node(node);
     rclcpp::WallRate loopRate(10.0);
     while (rclcpp::ok()) {
-        rclcpp::spin_some(node);
+        // Drain the short sensor queues within a bounded window. spin_some
+        // takes one callback per subscription; at a 10 Hz strategy loop this
+        // left the 50 Hz head/IMU topics behind the camera timestamp.
+        executor.spin_all(std::chrono::milliseconds(5));
         strategy.tick();
         loopRate.sleep();
     }

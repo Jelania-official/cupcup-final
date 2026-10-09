@@ -15,6 +15,8 @@ import time
 
 import rclpy
 from common.msg import BodyTask, GameData, HeadTask, ImuData, Location
+from rclpy.executors import ExternalShutdownException
+from rclpy._rclpy_pybind11 import RCLError
 from rclpy.node import Node
 
 
@@ -29,6 +31,7 @@ class ScriptedOpponent(Node):
         self.location = Location()
         self.imu = ImuData()
         self.started = time.monotonic()
+        self.play_started: float | None = None
         self.last_log = 0.0
         self.body_publisher = self.create_publisher(BodyTask, f"/{robot}/task/body", 5)
         self.head_publisher = self.create_publisher(HeadTask, f"/{robot}/task/head", 5)
@@ -39,6 +42,8 @@ class ScriptedOpponent(Node):
 
     def game_update(self, message: GameData) -> None:
         self.game_state = message.state
+        if self.game_state == GameData.STATE_PLAY and self.play_started is None:
+            self.play_started = time.monotonic()
 
     def location_update(self, message: Location) -> None:
         self.location = message
@@ -70,6 +75,14 @@ class ScriptedOpponent(Node):
                     body.step = 0.018
                 else:
                     body.count = 0
+            elif self.style == "probe" and self.robot.endswith("_1"):
+                # Isolate the kickoff gait: same robot and BodyTask interface,
+                # four command pairs in one match (8 wall seconds each).
+                stage = int((time.monotonic() - (self.play_started or self.started)) / 8.0)
+                commands = ((0.008, 4.0), (0.018, 4.0),
+                            (0.030, 4.0), (0.018, 0.0))
+                body.count = 1
+                body.step, body.turn = commands[min(stage, len(commands) - 1)]
             elif self.style == "wall":
                 # Hold a shallow own-half line.  A small lateral oscillation
                 # tests that cupcup handles a moving blocker without chasing
@@ -85,21 +98,28 @@ class ScriptedOpponent(Node):
             self.get_logger().info(
                 f"style={self.style} state={self.game_state} "
                 f"loc=({self.location.x:.2f},{self.location.z:.2f}) "
-                f"fall={self.imu.fall} step={body.step:.3f} lateral={body.lateral:.3f}"
+                f"fall={self.imu.fall} step={body.step:.3f} lateral={body.lateral:.3f} "
+                f"turn={body.turn:.1f}"
             )
             self.last_log = elapsed
 
 
 def main() -> int:
-    if len(sys.argv) != 3 or sys.argv[2] not in {"rush", "wall", "keeper"}:
-        print("usage: scripted_opponent.py <robot_name> <rush|wall|keeper>", file=sys.stderr)
+    if len(sys.argv) != 3 or sys.argv[2] not in {"rush", "wall", "keeper", "probe"}:
+        print("usage: scripted_opponent.py <robot_name> <rush|wall|keeper|probe>",
+              file=sys.stderr)
         return 2
     rclpy.init()
     node = ScriptedOpponent(sys.argv[1], sys.argv[2])
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
+    except RCLError:
+        # SIGINT may invalidate the context while a timer is publishing.
+        # Do not hide runtime publication errors with a healthy context.
+        if rclpy.ok():
+            raise
     finally:
         node.destroy_node()
         if rclpy.ok():

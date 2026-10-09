@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>cupcup 战术平台</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <div>
+      <p class="eyebrow">CUP CUP · KIDSIZE 2V2</p>
+      <h1>战术观察与沙盒</h1>
+    </div>
+    <div id="connection" class="connection">正在连接…</div>
+  </header>
+  <nav aria-label="运行模式">
+    <button class="tab active" data-mode="live">比赛观察</button>
+    <button class="tab" data-mode="sandbox">独立策略沙盒</button>
+    <span class="nav-note">同一比赛策略 · 真实比赛不使用仿真真值</span>
+  </nav>
+
+  <main>
+    <section id="live-panel" class="mode-panel">
+      <div class="toolbar">
+        <div>
+          <h2>实时比赛状态</h2>
+          <p>只显示机器人策略发布的估计与状态；未知对手位置不会伪造。回放暂停不会暂停真实比赛。</p>
+        </div>
+        <div class="score"><span id="live-red-score">—</span><small>RED</small>
+          <b>:</b><span id="live-blue-score">—</span><small>BLUE</small></div>
+      </div>
+      <div id="live-layers" class="map-controls"></div>
+      <div class="field-wrap"><canvas id="live-field" aria-label="实时场地"></canvas></div>
+      <details class="object-details" open><summary>对象详情（点击机器人或选择观察者）</summary><div id="live-details" class="detail-grid"></div></details>
+      <div id="live-status" class="status-card">等待 ROS 2 Talk 状态…</div>
+      <div class="playback">
+        <button id="live-export" type="button">导出观测回放</button>
+        <label>导入回放 <input id="live-import" type="file" accept=".json,.jsonl"></label>
+        <button id="live-resume" type="button">恢复实时</button>
+        <button id="live-play" type="button" disabled>播放</button>
+        <button id="live-step" type="button" disabled>单步</button>
+        <button id="live-start" type="button" disabled>回到开头</button>
+        <label>速度 <select id="live-speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select></label>
+        <input id="live-timeline" type="range" min="0" max="0" value="0" disabled>
+        <span id="live-replay-time">实时</span>
+        <span id="live-file-status" class="map-note" role="status"></span>
+      </div>
+      <div class="legend">
+        <span><i class="dot red"></i>红方估计</span>
+        <span><i class="dot blue"></i>蓝方估计</span>
+        <span><i class="dot ball"></i>球地图估计</span>
+        <span><i class="target-mark"></i>当前意图目标</span>
+        <span>橙线：共享计划球路（不含近脚执行修正）</span>
+        <span>青色短线：执行层对准目标（不是实测朝向或球轨迹）</span>
+        <span><i class="candidate-mark"></i>红／蓝／未知机器人候选（低置信）</span>
+        <span>紫色虚线菱形：该机策略使用的队友障碍（不是本机观测）</span>
+      </div>
+    </section>
+
+    <section id="sandbox-panel" class="mode-panel hidden">
+      <div class="toolbar">
+        <div>
+          <h2>独立二维策略沙盒</h2>
+          <p>复用线上比赛策略；先生成实验，再播放记录。暂停与单步操作记录，修改参数后需要重新运行。</p>
+        </div>
+        <div class="score"><span id="sandbox-red-score">0</span><small>RED</small>
+          <b>:</b><span id="sandbox-blue-score">0</span><small>BLUE</small></div>
+      </div>
+      <form id="sandbox-controls" class="controls">
+        <label>水平观察模型
+          <select name="vision_model">
+            <option value="pan">78°视场 + 有限转头（未完整标定）</option>
+            <option value="legacy">旧190°包络（历史对照）</option>
+          </select>
+        </label>
+        <label>cupcup 阵营
+          <select name="cupcup_color">
+            <option value="red">红方</option>
+            <option value="blue">蓝方</option>
+          </select>
+        </label>
+        <label>对手策略
+          <select name="opponent">
+            <option value="block">前锋追球 + 后卫封堵</option>
+            <option value="press">双人压迫抢球</option>
+            <option value="keeper">前锋追球 + 深位防守</option>
+            <option value="shared">同一 cupcup 逻辑自对抗</option>
+          </select>
+        </label>
+        <label>随机种子 <input name="seed" type="number" value="7" min="0"></label>
+        <label>时长 <span><input name="duration" type="number" value="45" min="5" max="900"> 模型秒</span></label>
+        <label>信息模式 <select name="mode">
+          <option value="realistic">现实观测（误差/延迟）</option>
+          <option value="oracle">完全信息（仅二维实验）</option>
+        </select></label>
+        <label>场景 <select name="scenario">
+          <option value="kickoff">中场开局</option><option value="own-half">己方半场球</option>
+          <option value="incoming">来球拦截</option><option value="sideline">边线重开检查</option>
+          <option value="shot">球门线检查</option>
+        </select></label>
+        <label>批测种子数 <input name="trials" type="number" value="8" min="2" max="32"></label>
+        <label>观测噪声 σ <span><input name="noise" type="number" value="0.20" min="0" max="0.8" step="0.02"> 米</span></label>
+        <label>我方踢球速度 <span><input name="kick_speed" type="number" value="0.9" min="0" max="6" step="any"> m/s</span></label>
+        <label>我方速度 <input name="speed" type="number" value="0.4" min="0" max="1.5" step="any"></label>
+        <label>对手速度 <input name="opponent_speed" type="number" value="0.4" min="0" max="1.5" step="any"></label>
+        <label>我方转速（度/秒） <input name="turn" type="number" value="150" min="1" max="360" step="any"></label>
+        <label>对手转速（度/秒） <input name="opponent_turn" type="number" value="150" min="1" max="360" step="any"></label>
+        <label>我方踢球准备（秒） <input name="setup" type="number" value="1" min="0.05" max="10" step="0.05"></label>
+        <label>对手踢球准备（秒） <input name="opponent_setup" type="number" value="1" min="0.05" max="10" step="0.05"></label>
+        <label>对手踢球速度 <input name="opponent_kick_speed" type="number" value="0.9" min="0" max="8" step="any"></label>
+        <label>观测延迟（秒） <input name="delay" type="number" value="0.1" min="0" max="2" step="0.05"></label>
+        <label>漏检概率 <input name="dropout" type="number" value="0" min="0" max="1" step="0.05"></label>
+        <label>自机定位噪声 σ <input name="self_noise" type="number" value="0" min="0" max="1" step="0.05"></label>
+        <label>球速衰减 / 秒 <input name="ball_decay" type="number" value="0.9" min="0.05" max="5" step="any"></label>
+        <label>踢球方向切换门槛 <input name="kick_hysteresis" type="number" value="0.25" min="0" max="2" step="0.05"></label>
+        <label>后卫站位 <select name="defense_mode">
+          <option value="line">球与己方球门之间</option><option value="fixed">固定纵向锚点（对照）</option>
+        </select></label>
+        <details class="scene-editor">
+          <summary>初始场景编辑（仅独立沙盒）</summary>
+          <p>坐标单位米；红方己方球门在 +x，蓝方在 −x。朝向 0° 为 +x，90° 为 −z。自定义只覆盖开局，进球后的重开仍使用默认站位。</p>
+          <label>初始状态 <select name="initial_state_mode"><option value="preset">使用上方预设</option><option value="custom">使用下方自定义</option></select></label>
+          <div id="initial-state-fields" class="controls"></div>
+          <label>点击地图放置 <select id="scene-selected"><option value="ball">球</option><option value="red1">红1</option><option value="red2">红2</option><option value="blue1">蓝1</option><option value="blue2">蓝2</option></select></label>
+          <div class="field-wrap"><canvas id="scene-preview" aria-label="初始场景编辑地图"></canvas></div>
+          <p>点击只编辑开局输入，不移动真实机器人；选择“自定义”并运行后生效。机器人重叠时拒绝运行；允许构造规则违规站位用于测试。</p>
+        </details>
+        <button class="primary" type="submit">运行 / 重置</button>
+        <button id="evaluate-button" type="button">多种子评测</button>
+      </form>
+      <div class="playback">
+        <label>导入受控测量 <input id="calibration-import" type="file" accept=".json"></label>
+        <span id="calibration-status">默认参数未完成校准；可以导入离线测量报告作为实验起点。</span>
+      </div>
+      <div class="playback">
+        <button id="play-toggle" type="button" disabled>播放</button>
+        <button id="step-button" type="button" disabled>单步</button>
+        <button id="sandbox-start" type="button" disabled>回到开头</button>
+        <label>速度 <select id="sandbox-speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select></label>
+        <button id="sandbox-export" type="button">导出实验</button>
+        <label>导入实验 <input id="sandbox-import" type="file" accept=".json"></label>
+        <input id="timeline" type="range" min="0" max="0" value="0" disabled>
+        <span id="sim-time">0.0 s</span>
+      </div>
+      <div id="sandbox-layers" class="map-controls"></div>
+      <div class="field-wrap"><canvas id="sandbox-field" aria-label="二维策略沙盒"></canvas></div>
+      <details class="object-details" open><summary>对象详情（点击机器人或选择观察者）</summary><div id="sandbox-details" class="detail-grid"></div></details>
+      <div class="legend">
+        <span><i class="dot red"></i>红方机器人</span>
+        <span><i class="dot blue"></i>蓝方机器人</span>
+        <span><i class="dot ball"></i>模拟球真值</span>
+        <span><i class="belief-mark"></i>圆圈：原始球观测；绿方框：决策地图球位</span>
+        <span><i class="target-mark"></i>策略目标点</span>
+        <span>细白线：二维头朝向（不是实测视线）</span>
+        <span>橙线：共享计划球路（不含近脚执行修正）</span>
+      </div>
+      <div class="status-card warning">
+        暂定运动模型，尚未完成受控校准。重开自动等待 3 秒是实验约定，不等价于正式裁判的人工流程。
+        水平转头模型的90°/s尚未标定，未模拟俯仰、遮挡或号码牌完整可见条件；完全信息模式绕过视野限制。
+        下方指标使用模拟真值离线评分，不输入策略；近球机会只表示 0.6 m 内有己方、无对方，不能当作控球率。
+        准备门控为两机累计机器人秒，可能超过比赛时间；同代码自对抗会同时改变双方策略，不能当固定对手对照。
+      </div>
+      <div id="sandbox-metrics" class="metrics"></div>
+      <div id="evaluation-result" class="status-card">多种子结果尚未运行。</div>
+    </section>
+  </main>
+  <footer>比赛真值仅用于离线评估；实时策略输入与模拟真值分层显示。</footer>
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -50,15 +50,17 @@ feat(strategy): 增加后卫失效接管
 ```bash
 python3 src/cupcup/tests/test_package.py
 source /opt/ros/humble/setup.bash
-colcon build \
-  --build-base /tmp/cupcup-build \
-  --install-base /tmp/cupcup-install
-ctest --test-dir /tmp/cupcup-build/cupcup --output-on-failure
+colcon --log-base /home/j/.cache/cupcup/log build --base-paths src \
+  --build-base /home/j/.cache/cupcup/build \
+  --install-base /home/j/.cache/cupcup/install
+ctest --test-dir /home/j/.cache/cupcup/build/cupcup --output-on-failure
 ```
 
-涉及运动、视觉、球权或边界的改动，还应运行至少一场 180 秒 Webots 回归，并把
+涉及运动、视觉、球权或边界的改动，还应运行至少一场 180 墙钟秒 Webots 回归，并把
 颜色、对手、时长、比分、踢球次数、跌倒次数和日志目录写入
 `src/cupcup/tests/TEST_REPORT.md`。失败实验也要记录，不能只保留成功结果。
+记录时同时注明 CSV 的仿真时间；墙钟回归不能冒充正式时长比赛。缓存/日志可换为本机
+ASCII 路径，避免依赖重启后会清理的 `/tmp`。用户没有明确要求时，不自动提交或推送。
 
 ## 修改边界
 
@@ -69,6 +71,23 @@ ctest --test-dir /tmp/cupcup-build/cupcup --output-on-failure
 5. 模型、外部代码和外部权重必须记录来源、许可证和是否允许随包发布。
 6. 参数调优应写入 `config/strategy.yaml`，不要在 `player.cpp` 中散落同一参数的
    多个魔数。
+
+## 设计取舍与复杂度
+
+1. 先判断当前瓶颈对整场比赛的影响，再选择改动；说明预期改善的比赛指标、依赖
+   条件和可能副作用。不要因为某个局部指标变好，就默认整体策略变强。
+2. 遇到已知难题，优先查找有比赛/实验依据的公开方案。先比较它的传感器、机器人、
+   坐标系、软件接口和测试条件，再决定复用算法、适配代码或只借鉴架构；不能把
+   “论文/项目成绩好”当成“适合本平台”的证据。
+3. 区分实测状态、推算状态和未知状态。没有身份、距离或置信度依据时，不得把视觉
+   候选伪装成确定的对手/队友位置，也不得让低可信估计直接驱动高风险动作。
+4. 优先复用现有数据通路和小型通用模块。只有当基准测试证明简单做法不够时，才增加
+   滤波器、角色、状态机或 ROS 接口；避免多个模块重复保存同一状态。
+5. 外部代码复用必须核对具体版本、文件级许可证、依赖和来源，并遵守比赛细则的
+   反抄袭要求；许可证允许分发，不自动代表比赛规则允许照搬。无法确认时只借鉴并
+   记录设计思路，不复制实现。
+6. 比较策略时使用双方颜色、多个随机种子和场景分层，保留失败样本；同时看进球、
+   踢球成功率、越界/罚站、摔倒、卡死和传感器健康，防止单一指标优化导致整体退化。
 
 ## Pull Request 内容
 

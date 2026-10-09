@@ -3,5 +3,18 @@
   "opencv_sha256": "3ee7c48c82e354dfb60c75939c287e2a0241bb3cf43e17495ccd64cf295c9f63",
   "opencv_bytes": 25832307,
   "status": "Package-local development copy; upstream weight licence requires final release review",
-  "decoder_anchor": 99.99983
+  "decoder_anchor": 99.99983,
+  "upstream_review": {
+    "checked_on": "2026-10-08",
+    "source_http_status": 200,
+    "source_content_length": 28358260,
+    "source_last_modified": "Wed, 01 Jul 2026 12:48:02 GMT",
+    "model_config": "https://data.bit-bots.de/models/2026_07_01_yoeo_x_wm/model_config.yaml",
+    "detection_classes": ["ball", "robot"],
+    "segmentation_classes": ["background", "lines"],
+    "code_license_url": "https://github.com/bit-bots/YOEO/blob/main/LICENSE",
+    "code_license_observed": "GPL-3.0 text, not proof of this weight artifact's licence",
+    "weight_license_confirmed": false,
+    "scope": "HEAD and directory/config review only; original weight not downloaded or hashed in this review"
+  }
 }
