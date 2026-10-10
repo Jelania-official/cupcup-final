@@ -178,6 +178,10 @@ public:
             node_->declare_parameter<double>("settle_seconds", 0.08), 0.05, 0.50);
         alignStableFrames_ = std::max(2, std::min(4,
             static_cast<int>(node_->declare_parameter<int>("align_stable_frames", 3))));
+        finalShotDistance_ = clampValue(
+            node_->declare_parameter<double>("final_shot_distance", 0.82), 0.25, 2.20);
+        finalCarrySpeed_ = clampValue(
+            node_->declare_parameter<double>("final_carry_speed", 0.050), 0.025, 0.055);
         attackYaw_ = color_ == Color::Red ? 180.0 : 0.0;
         targetYaw_ = attackYaw_;
         yawSign_ = node_->declare_parameter<double>("imu_yaw_sign", 1.0);
@@ -247,6 +251,15 @@ public:
             [this](common::msg::Location::ConstSharedPtr message) {
                 if (!std::isfinite(message->x) || !std::isfinite(message->z)) return;
                 location_ = *message;
+                if (!filteredLocationValid_) {
+                    filteredLocationX_ = message->x;
+                    filteredLocationZ_ = message->z;
+                    filteredLocationValid_ = true;
+                } else {
+                    constexpr double locationAlpha = 0.12;
+                    filteredLocationX_ += locationAlpha * (message->x - filteredLocationX_);
+                    filteredLocationZ_ += locationAlpha * (message->z - filteredLocationZ_);
+                }
                 locationAt_ = nowSeconds();
             });
 
@@ -399,11 +412,13 @@ private:
         shotYawOffset_ = 0.0;
         shotLaneSelected_ = false;
         targetYaw_ = attackYaw_;
+        filteredLocationValid_ = false;
         teammateStatus_ = cupcup::TeamStatus();
         tacticalDecision_ = cupcup::TacticalDecision();
         tacticalAction_ = cupcup::TacticalAction::Hold;
         claim_ = false;
         clearMode_ = false;
+        attackKickCount_ = 0;
         healthy_ = false;
         boundaryGuard_.reset();
         transition(ForwardState::Wait, time);
@@ -431,8 +446,13 @@ private:
         RCLCPP_INFO(node_->get_logger(), "%s strategy -> %s", robot_.c_str(), stateName(state_));
         if (next == ForwardState::Kick) {
             actionIssued_ = false;
-            RCLCPP_INFO(node_->get_logger(), "%s kick foot=%s lane_offset=%.1f",
-                robot_.c_str(), leftFoot_ ? "left" : "right", shotYawOffset_);
+            if (id_ == 1 && !clearMode_) ++attackKickCount_;
+            const double goalX = color_ == Color::Red ? -4.5 : 4.5;
+            const double positionX = filteredLocationValid_ ? filteredLocationX_ : location_.x;
+            RCLCPP_INFO(node_->get_logger(),
+                "%s kick foot=%s lane_offset=%.1f attack_kick=%d goal_distance=%.2f",
+                robot_.c_str(), leftFoot_ ? "left" : "right", shotYawOffset_,
+                attackKickCount_, std::abs(goalX - positionX));
             if (clearMode_) {
                 RCLCPP_INFO(node_->get_logger(), "%s defender clear kick foot=%s",
                     robot_.c_str(), leftFoot_ ? "left" : "right");
@@ -523,8 +543,12 @@ private:
     {
         if (!locationFresh) return;
         const double goalX = color_ == Color::Red ? -4.5 : 4.5;
-        if (std::abs(goalX - location_.x) <= 0.7) return;
-        const double geometric = std::atan2(-location_.z, std::abs(goalX - location_.x)) *
+        const bool useFilteredFinalAim = id_ == 1 && attackKickCount_ >= 2 &&
+            filteredLocationValid_;
+        const double positionX = useFilteredFinalAim ? filteredLocationX_ : location_.x;
+        const double positionZ = useFilteredFinalAim ? filteredLocationZ_ : location_.z;
+        if (std::abs(goalX - positionX) <= 0.7) return;
+        const double geometric = std::atan2(-positionZ, std::abs(goalX - positionX)) *
             180.0 / M_PI;
         const double desired = wrapDegrees(
             attackYaw_ + (goalX < 0.0 ? geometric : -geometric) + shotYawOffset_);
@@ -664,6 +688,14 @@ private:
     void selectShotLane(bool locationFresh)
     {
         if (shotLaneSelected_) return;
+        if (id_ == 1 && !clearMode_ && attackKickCount_ >= 2) {
+            // At final-shot range the geometric target already points through
+            // the middle of the goal. A large keeper-avoidance offset can
+            // turn an otherwise certain short shot into a post-side miss.
+            shotYawOffset_ = 0.0;
+            shotLaneSelected_ = true;
+            return;
+        }
         double worldX = 0.0;
         double worldZ = 0.0;
         if (locationFresh && worldBall(worldX, worldZ)) {
@@ -828,13 +860,44 @@ private:
             } else if (fixedView) {
                 if (std::abs(headingError()) > 27.0) transition(ForwardState::Orbit, time);
                 else if (stableFrames_ >= alignStableFrames_) {
+                    const double goalX = color_ == Color::Red ? -4.5 : 4.5;
+                    const double positionX = filteredLocationValid_ ?
+                        filteredLocationX_ : location_.x;
+                    const double goalDistance = std::abs(goalX - positionX);
+                    const bool carryIntoFinalRange = id_ == 1 && !clearMode_ &&
+                        attackKickCount_ >= 2 &&
+                        (!locationFresh || goalDistance > finalShotDistance_);
                     // The alignment counter already represents consecutive
                     // fresh camera frames and `linedUp` is true for the final
                     // frame.  Enter KICK directly instead of spending another
                     // 10 Hz control cycle in SETTLE; this removes about 0.1 s
                     // of visible wind-up without weakening the consecutive-frame
                     // confirmation or the final ball-position check.
-                    transition(ForwardState::Kick, time);
+                    if (carryIntoFinalRange) {
+                        // After two advancing kicks, do not waste the third
+                        // action just short of the goal line.  Use the same
+                        // proven top speed as APPROACH while the goal is far,
+                        // then taper near the shooting threshold so the ball
+                        // remains between the feet.  The previous fixed
+                        // 0.022 m/s crawl could look stationary for more than
+                        // a minute after an ineffective second kick.
+                        const double distanceOutsideRange =
+                            std::max(0.0, goalDistance - finalShotDistance_);
+                        const double carrySpeed = clampValue(
+                            0.030 + 0.020 * distanceOutsideRange,
+                            0.030, finalCarrySpeed_);
+                        walk(body, carrySpeed,
+                            clampValue((desiredX - ball_.x) * 0.22, -0.018, 0.018),
+                            clampValue(headingError() * 0.18, -4.0, 4.0));
+                    } else if (id_ == 1 && !clearMode_ && attackKickCount_ >= 2) {
+                        // The final shot follows a dribble. Give the gait one
+                        // bounded settle cycle so the action engine receives
+                        // the kick from a planted support foot. Advancing
+                        // kicks keep the direct fast path.
+                        transition(ForwardState::Settle, time);
+                    } else {
+                        transition(ForwardState::Kick, time);
+                    }
                 }
                 else walk(body, clampValue((kickY_ - ball_.y) * 0.24, -0.022, 0.030),
                           clampValue((desiredX - ball_.x) * 0.30, -0.028, 0.028),
@@ -1225,6 +1288,10 @@ private:
     double approachTimeout_ = 60.0;
     double orbitTimeout_ = 25.0;
     double settleSeconds_ = 0.08;
+    double finalShotDistance_ = 0.82;
+    double finalCarrySpeed_ = 0.050;
+    double filteredLocationX_ = 0.0;
+    double filteredLocationZ_ = 0.0;
     int alignStableFrames_ = 3;
     int ballConfirmHits_ = 2;
     double commandedHeadYaw_ = 0.0;
@@ -1236,6 +1303,8 @@ private:
     std::size_t processedImageSequence_ = 0;
     int visibleHits_ = 0;
     int stableFrames_ = 0;
+    int attackKickCount_ = 0;
+    bool filteredLocationValid_ = false;
     int recoveryCount_ = 0;
     bool freshImage_ = false;
     bool searchLowFirst_ = false;

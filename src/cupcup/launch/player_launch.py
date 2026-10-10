@@ -42,6 +42,8 @@ def generate_launch_description():
         "orbit_timeout": 25.0,
         "settle_seconds": 0.08,
         "align_stable_frames": 3,
+        "final_shot_distance": 0.82,
+        "final_carry_speed": 0.050,
     }
     return LaunchDescription([
         DeclareLaunchArgument("team_name", default_value="cupcup"),
