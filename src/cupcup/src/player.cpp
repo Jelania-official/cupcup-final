@@ -827,8 +827,15 @@ private:
                 if (time - ballSeenAt_ > 0.8) transition(ForwardState::Recover, time);
             } else if (fixedView) {
                 if (std::abs(headingError()) > 27.0) transition(ForwardState::Orbit, time);
-                else if (stableFrames_ >= alignStableFrames_)
-                    transition(ForwardState::Settle, time);
+                else if (stableFrames_ >= alignStableFrames_) {
+                    // The alignment counter already represents consecutive
+                    // fresh camera frames and `linedUp` is true for the final
+                    // frame.  Enter KICK directly instead of spending another
+                    // 10 Hz control cycle in SETTLE; this removes about 0.1 s
+                    // of visible wind-up without weakening the consecutive-frame
+                    // confirmation or the final ball-position check.
+                    transition(ForwardState::Kick, time);
+                }
                 else walk(body, clampValue((kickY_ - ball_.y) * 0.24, -0.022, 0.030),
                           clampValue((desiredX - ball_.x) * 0.30, -0.028, 0.028),
                           clampValue(headingError() * 0.22, -6.0, 6.0));
